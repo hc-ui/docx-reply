@@ -17,7 +17,7 @@ from .render import (
 )
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     # Emit UTF-8 regardless of the console code page, so that redirecting
     # stdout to a file (docx-reply x.docx > out.md) yields a UTF-8 file on
     # Windows too instead of a locale-encoded (e.g. GBK) one; and never
@@ -68,9 +68,10 @@ def main(argv: "list[str] | None" = None) -> int:
     if args.no_revisions:
         review.revisions = []
     if args.author:
-        wanted = set(args.author)
-        review.comments = [c for c in review.comments if c.author in wanted]
-        review.revisions = [r for r in review.revisions if r.author in wanted]
+        # Word sometimes stores author names with stray surrounding spaces
+        wanted = {a.strip() for a in args.author}
+        review.comments = [c for c in review.comments if c.author.strip() in wanted]
+        review.revisions = [r for r in review.revisions if r.author.strip() in wanted]
     if args.skip_resolved:
         review.comments = [c for c in review.comments if not c.resolved]
 

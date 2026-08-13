@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docx-reply"
-version = "0.3.2"
+version = "0.3.3"
 description = "Turn Word (.docx) review comments and tracked changes into a fillable revision response table (修改对照表) — Markdown / CSV / JSON, zero dependencies"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -50,10 +50,23 @@ Changelog = "https://github.com/hc-ui/docx-reply/blob/main/CHANGELOG.md"
 docx-reply = "docx_reply.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "ruff>=0.4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "RUF"]
+ignore = [
+    "E501",   # long lines: Chinese doc strings and XML templates read better unwrapped
+    "RUF001", # ambiguous fullwidth punctuation is intentional in Chinese output
+    "RUF002",
+    "RUF003",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

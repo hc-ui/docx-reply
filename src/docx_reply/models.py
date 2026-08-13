@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 
 def _short_date(date: str) -> str:
@@ -21,15 +20,15 @@ class Comment:
     date: str
     text: str
     # paraId of the comment's last paragraph; links to commentsExtended.xml
-    para_id: Optional[str] = None
+    para_id: str | None = None
     quoted: str = ""
-    para_index: Optional[int] = None
+    para_index: int | None = None
     para_text: str = ""
     heading: str = ""
     # document story holding the anchor: "" body, 脚注/尾注/页眉/页脚
     part: str = ""
     resolved: bool = False
-    replies: List["Comment"] = field(default_factory=list)
+    replies: list[Comment] = field(default_factory=list)
 
     @property
     def date_short(self) -> str:
@@ -67,12 +66,12 @@ class Revision:
     author: str
     date: str
     text: str
-    para_index: Optional[int] = None
+    para_index: int | None = None
     para_text: str = ""
     heading: str = ""
     part: str = ""
-    deleted: Optional[str] = None
-    inserted: Optional[str] = None
+    deleted: str | None = None
+    inserted: str | None = None
 
     @property
     def date_short(self) -> str:
@@ -95,7 +94,7 @@ class Revision:
         return d
 
 
-def _count(comments: List[Comment]) -> int:
+def _count(comments: list[Comment]) -> int:
     return sum(1 + _count(c.replies) for c in comments)
 
 
@@ -105,8 +104,8 @@ class Review:
 
     source: str
     paragraph_count: int = 0
-    comments: List[Comment] = field(default_factory=list)
-    revisions: List[Revision] = field(default_factory=list)
+    comments: list[Comment] = field(default_factory=list)
+    revisions: list[Revision] = field(default_factory=list)
 
     @property
     def total_comments(self) -> int:
@@ -121,14 +120,14 @@ class Review:
         return sum(1 for c in self.comments if c.resolved)
 
     @property
-    def authors(self) -> List[str]:
-        seen: List[str] = []
+    def authors(self) -> list[str]:
+        seen: list[str] = []
 
         def add(name: str) -> None:
             if name and name not in seen:
                 seen.append(name)
 
-        def walk(comments: List[Comment]) -> None:
+        def walk(comments: list[Comment]) -> None:
             for c in comments:
                 add(c.author)
                 walk(c.replies)

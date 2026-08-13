@@ -1,7 +1,7 @@
 import pytest
+from conftest import anchored, comment_xml, p, r
 
 from docx_reply import DocxReviewError, extract_review
-from conftest import anchored, comment_xml, p, r
 
 
 def test_document_without_comments(docx_factory):
@@ -66,8 +66,8 @@ def test_missing_comments_extended_means_flat_unresolved(docx_factory):
 
 def test_comment_range_across_paragraphs(docx_factory):
     body = (
-        "<w:p>" + f'<w:commentRangeStart w:id="0"/>' + r("前一段结尾") + "</w:p>"
-        "<w:p>" + r("后一段开头") + f'<w:commentRangeEnd w:id="0"/>'
+        "<w:p>" + '<w:commentRangeStart w:id="0"/>' + r("前一段结尾") + "</w:p>"
+        "<w:p>" + r("后一段开头") + '<w:commentRangeEnd w:id="0"/>'
         '<w:r><w:commentReference w:id="0"/></w:r>' + "</w:p>"
     )
     comments = comment_xml("0", "王老师", "这两段衔接生硬。")
@@ -155,12 +155,12 @@ def test_quoted_keeps_text_a_reviewer_deleted(docx_factory):
     # the comment was anchored on the original text; if a tracked deletion
     # strikes part of it through, the quoted excerpt must not lose that part
     body = p(
-        f'<w:commentRangeStart w:id="0"/>'
+        '<w:commentRangeStart w:id="0"/>'
         + r("保留的")
         + '<w:del w:id="5" w:author="A" w:date="2026-08-11T00:00:00Z">'
         + "<w:r><w:delText>被删的</w:delText></w:r></w:del>"
         + r("文字")
-        + f'<w:commentRangeEnd w:id="0"/>'
+        + '<w:commentRangeEnd w:id="0"/>'
         + '<w:r><w:commentReference w:id="0"/></w:r>'
     )
     comments = comment_xml("0", "王老师", "措辞再斟酌。")
@@ -203,12 +203,12 @@ def test_move_reported_once_at_new_location(docx_factory):
     assert review.comments == []
     path2 = docx_factory(
         "<w:p>"
-        + f'<w:commentRangeStart w:id="0"/>'
+        + '<w:commentRangeStart w:id="0"/>'
         + '<w:moveTo w:id="20" w:author="A" w:date="2026-08-11T00:00:00Z">'
         + r("移动来的")
         + "</w:moveTo>"
         + r("正文")
-        + f'<w:commentRangeEnd w:id="0"/>'
+        + '<w:commentRangeEnd w:id="0"/>'
         + '<w:r><w:commentReference w:id="0"/></w:r>'
         + "</w:p>",
         comment_xml("0", "A", "检查可见性"),
@@ -220,7 +220,7 @@ def test_move_reported_once_at_new_location(docx_factory):
 def test_not_a_zip_raises(tmp_path):
     bogus = tmp_path / "fake.docx"
     bogus.write_text("这不是一个 zip 文件", encoding="utf-8")
-    with pytest.raises(DocxReviewError, match="不是有效的 .docx"):
+    with pytest.raises(DocxReviewError, match=r"不是有效的 \.docx"):
         extract_review(bogus)
 
 
@@ -230,7 +230,7 @@ def test_zip_without_document_xml_raises(tmp_path):
     path = tmp_path / "empty.docx"
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("hello.txt", "hi")
-    with pytest.raises(DocxReviewError, match="缺少 word/document.xml"):
+    with pytest.raises(DocxReviewError, match=r"缺少 word/document\.xml"):
         extract_review(path)
 
 

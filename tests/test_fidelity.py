@@ -1,7 +1,8 @@
 """Extraction-fidelity tests: text boxes, formulas, ruby text, docx table schema."""
 
-from docx_reply import extract_review, render_docx
 from conftest import anchored, comment_xml, p, r
+
+from docx_reply import extract_review, render_docx
 
 
 def _textbox(inner: str) -> str:

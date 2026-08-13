@@ -163,7 +163,7 @@ _DOCX_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 """
 
 
-def _docx_p(text: str = "", bold: bool = False, size: "int | None" = None) -> str:
+def _docx_p(text: str = "", bold: bool = False, size: int | None = None) -> str:
     if not text:
         return "<w:p/>"
     rpr = ""
@@ -177,12 +177,12 @@ def _docx_p(text: str = "", bold: bool = False, size: "int | None" = None) -> st
     return f'<w:p><w:r>{rpr}<w:t xml:space="preserve">{_xml_escape(text)}</w:t></w:r></w:p>'
 
 
-def _docx_cell(lines: "list[str]", bold: bool = False) -> str:
+def _docx_cell(lines: list[str], bold: bool = False) -> str:
     paragraphs = "".join(_docx_p(line, bold=bold) for line in lines) or "<w:p/>"
     return f'<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr>{paragraphs}</w:tc>'
 
 
-def _docx_table(headers: "list[str]", rows: "list[list[list[str]]]") -> str:
+def _docx_table(headers: list[str], rows: list[list[list[str]]]) -> str:
     borders = "".join(
         f'<w:{side} w:val="single" w:sz="4" w:color="auto"/>'
         for side in ("top", "left", "bottom", "right", "insideH", "insideV")
@@ -205,7 +205,7 @@ def _docx_table(headers: "list[str]", rows: "list[list[list[str]]]") -> str:
 
 def render_docx(review: Review, include_revisions: bool = True) -> bytes:
     """Build a .docx response table (修改对照表) ready to fill in and submit."""
-    body: "list[str]" = [
+    body: list[str] = [
         _docx_p(f"审阅意见对照表：{review.source}", bold=True, size=32),
         _docx_p(_summary(review)),
         _docx_p(),

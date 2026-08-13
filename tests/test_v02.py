@@ -4,9 +4,10 @@ import json
 import zipfile
 from xml.etree import ElementTree as ET
 
+from conftest import anchored, comment_xml, p, r, write_docx
+
 from docx_reply import extract_review, render_markdown
 from docx_reply.cli import main
-from conftest import anchored, comment_xml, p, r, write_docx
 
 
 def ins(text, author="王老师", wid="10"):

@@ -20,7 +20,6 @@ import itertools
 import re
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
 from .models import Comment, Review, Revision
@@ -96,6 +95,11 @@ _PART_LABELS = (
     ("header", "页眉"),
     ("footer", "页脚"),
 )
+_FOOTNOTE = _q(_W, "footnote")
+_ENDNOTE = _q(_W, "endnote")
+_TYPE = _q(_W, "type")
+# plumbing footnotes Word keeps around for the separator lines
+_SEPARATOR_TYPES = {"separator", "continuationSeparator", "continuationNotice"}
 
 
 class DocxReviewError(Exception):
@@ -107,7 +111,7 @@ def _collapse(text: str) -> str:
 
 
 def _run_text(run: ET.Element) -> str:
-    parts: List[str] = []
+    parts: list[str] = []
     for child in run:
         if child.tag in (_T, _DELTEXT):
             parts.append(child.text or "")
@@ -123,10 +127,10 @@ class _PartData:
 
     def __init__(self, label: str) -> None:
         self.label = label
-        self.paragraphs: List[str] = []
-        self.headings: List[Tuple[int, str]] = []
+        self.paragraphs: list[str] = []
+        self.headings: list[tuple[int, str]] = []
 
-    def nearest_heading(self, idx: Optional[int]) -> str:
+    def nearest_heading(self, idx: int | None) -> str:
         if idx is None:
             return ""
         best = ""
@@ -137,7 +141,7 @@ class _PartData:
                 break
         return best
 
-    def text_at(self, idx: Optional[int]) -> str:
+    def text_at(self, idx: int | None) -> str:
         if idx is not None and 0 <= idx < len(self.paragraphs):
             return self.paragraphs[idx]
         return ""
@@ -147,19 +151,19 @@ class _WalkState:
     """Facts accumulated across all document stories."""
 
     def __init__(self) -> None:
-        self.parts: Dict[str, _PartData] = {}
-        self.quoted: Dict[str, str] = {}
+        self.parts: dict[str, _PartData] = {}
+        self.quoted: dict[str, str] = {}
         # comment id -> (part label, paragraph index within the part)
-        self.anchor: Dict[str, Tuple[str, Optional[int]]] = {}
-        self.anchor_order: Dict[str, int] = {}
+        self.anchor: dict[str, tuple[str, int | None]] = {}
+        self.anchor_order: dict[str, int] = {}
         self.order = itertools.count()
-        self.revisions: List[Revision] = []
+        self.revisions: list[Revision] = []
         # revision -> (start, end) positions of the text-run counter, used
         # to detect truly adjacent del+ins pairs (replacements)
-        self.rev_spans: List[Tuple[int, int]] = []
+        self.rev_spans: list[tuple[int, int]] = []
         self.run_clock = [0]
 
-    def add_revision(self, rev: Revision, span: Tuple[int, int]) -> None:
+    def add_revision(self, rev: Revision, span: tuple[int, int]) -> None:
         self.revisions.append(rev)
         self.rev_spans.append(span)
 
@@ -168,20 +172,20 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
     pd = state.parts.setdefault(label, _PartData(label))
     # comment id -> text pieces accumulated while its range is open;
     # ranges may span paragraphs, so this lives outside the paragraph scope
-    open_ranges: Dict[str, List[str]] = {}
-    cur_idx: Optional[int] = None
-    cur_texts: Optional[List[str]] = None
+    open_ranges: dict[str, list[str]] = {}
+    cur_idx: int | None = None
+    cur_texts: list[str] | None = None
     clock = state.run_clock
 
     def anchor(cid: str) -> None:
         state.anchor.setdefault(cid, (label, cur_idx))
         state.anchor_order.setdefault(cid, next(state.order))
 
-    def paragraph_child(el: ET.Element, parent_tag: str, child_tag: str) -> Optional[ET.Element]:
+    def paragraph_child(el: ET.Element, parent_tag: str, child_tag: str) -> ET.Element | None:
         parent = el.find(parent_tag)
         return parent.find(child_tag) if parent is not None else None
 
-    def visit(el: ET.Element, in_del: bool, rev_buf: Optional[List[str]]) -> None:
+    def visit(el: ET.Element, in_del: bool, rev_buf: list[str] | None) -> None:
         nonlocal cur_idx, cur_texts
         tag = el.tag
         if tag == _P:
@@ -224,7 +228,7 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
             if buf is not None:
                 state.quoted[cid] = _collapse("".join(buf))
         elif tag in (_INS, _MOVE_TO):
-            ins_buf: List[str] = []
+            ins_buf: list[str] = []
             start = clock[0]
             for child in el:
                 visit(child, in_del, ins_buf)
@@ -242,7 +246,7 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
                     (start, clock[0]),
                 )
         elif tag in (_DEL, _MOVE_FROM):
-            del_buf: List[str] = []
+            del_buf: list[str] = []
             start = clock[0]
             for child in el:
                 visit(child, True, del_buf)
@@ -334,16 +338,16 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
 
 
 def _merge_replacements(
-    revisions: List[Revision], spans: List[Tuple[int, int]]
-) -> Tuple[List[Revision], List[Tuple[int, int]]]:
+    revisions: list[Revision], spans: list[tuple[int, int]]
+) -> tuple[list[Revision], list[tuple[int, int]]]:
     """Fold a del+ins pair with no text between them into one "replace".
 
     Selecting text in Word and typing over it records exactly this pair
     (in either order); presenting it as ``old → new`` is far more readable
     in a response table than two disconnected rows.
     """
-    merged: List[Revision] = []
-    mspans: List[Tuple[int, int]] = []
+    merged: list[Revision] = []
+    mspans: list[tuple[int, int]] = []
     i = 0
     while i < len(revisions):
         cur = revisions[i]
@@ -354,6 +358,8 @@ def _merge_replacements(
             if (
                 adjacent
                 and complementary
+                # an unknown ("") author must not count as "the same author"
+                and cur.author
                 and cur.author == nxt.author
                 and cur.part == nxt.part
                 and cur.para_index == nxt.para_index
@@ -382,8 +388,8 @@ def _merge_replacements(
 
 
 def _merge_format_runs(
-    revisions: List[Revision], spans: List[Tuple[int, int]]
-) -> List[Revision]:
+    revisions: list[Revision], spans: list[tuple[int, int]]
+) -> list[Revision]:
     """Combine adjacent format-revision fragments into one row.
 
     One formatting action in Word (e.g. bolding a sentence) splits into as
@@ -391,8 +397,8 @@ def _merge_format_runs(
     clock. Two separate formatted ranges in the same paragraph have plain
     text between them (non-adjacent spans) and stay separate rows.
     """
-    merged: List[Revision] = []
-    mspans: List[Tuple[int, int]] = []
+    merged: list[Revision] = []
+    mspans: list[tuple[int, int]] = []
     for rev, span in zip(revisions, spans):
         if merged:
             prev = merged[-1]
@@ -414,11 +420,11 @@ def _merge_format_runs(
     return merged
 
 
-def _parse_comments(root: ET.Element) -> List[Comment]:
-    comments: List[Comment] = []
+def _parse_comments(root: ET.Element) -> list[Comment]:
+    comments: list[Comment] = []
     for c in root.findall(_COMMENT):
-        pieces: List[str] = []
-        last_para_id: Optional[str] = None
+        pieces: list[str] = []
+        last_para_id: str | None = None
         for p in c.findall(f".//{_P}"):
             texts = [n.text or "" for n in p.iter() if n.tag in (_T, _DELTEXT, _M_T)]
             piece = _collapse("".join(texts))
@@ -440,9 +446,9 @@ def _parse_comments(root: ET.Element) -> List[Comment]:
     return comments
 
 
-def _parse_extended(root: ET.Element) -> Dict[str, Tuple[Optional[str], bool]]:
+def _parse_extended(root: ET.Element) -> dict[str, tuple[str | None, bool]]:
     """paraId -> (paraIdParent, done)."""
-    out: Dict[str, Tuple[Optional[str], bool]] = {}
+    out: dict[str, tuple[str | None, bool]] = {}
     for ce in root.findall(_EX):
         pid = ce.get(_EX_PARA)
         if pid:
@@ -450,7 +456,7 @@ def _parse_extended(root: ET.Element) -> Dict[str, Tuple[Optional[str], bool]]:
     return out
 
 
-def _read_part(zf: zipfile.ZipFile, name: str) -> Optional[ET.Element]:
+def _read_part(zf: zipfile.ZipFile, name: str) -> ET.Element | None:
     try:
         payload = zf.read(name)
     except KeyError:
@@ -461,11 +467,11 @@ def _read_part(zf: zipfile.ZipFile, name: str) -> Optional[ET.Element]:
         raise DocxReviewError(f"无法解析 {name}：{exc}") from exc
 
 
-def _extra_parts(names: List[str]) -> List[Tuple[str, str]]:
+def _extra_parts(names: list[str]) -> list[tuple[str, str]]:
     """(zip name, display label) for footnote/endnote/header/footer parts."""
     found = [n for n in names if _EXTRA_PART_RE.match(n)]
 
-    def sort_key(name: str) -> Tuple[int, int, str]:
+    def sort_key(name: str) -> tuple[int, int, str]:
         stem = name[len("word/") : -len(".xml")]
         for pos, (prefix, _) in enumerate(_PART_LABELS):
             if stem.startswith(prefix):
@@ -474,7 +480,7 @@ def _extra_parts(names: List[str]) -> List[Tuple[str, str]]:
                 return (pos, int(suffix) if suffix.isdigit() else 0, name)
         return (len(_PART_LABELS), 0, name)
 
-    out: List[Tuple[str, str]] = []
+    out: list[tuple[str, str]] = []
     for name in sorted(found, key=sort_key):
         stem = name[len("word/") : -len(".xml")]
         for prefix, label in _PART_LABELS:
@@ -484,7 +490,7 @@ def _extra_parts(names: List[str]) -> List[Tuple[str, str]]:
     return out
 
 
-def extract_review(path: "str | Path") -> Review:
+def extract_review(path: str | Path) -> Review:
     """Extract comments, replies, resolved state and tracked changes.
 
     Raises :class:`DocxReviewError` if the file is missing or is not a
@@ -508,11 +514,27 @@ def extract_review(path: "str | Path") -> Review:
             raise DocxReviewError("document.xml 中没有找到文档主体（w:body）")
 
         state = _WalkState()
-        _walk_part(body, "", state)
-        for name, label in _extra_parts(zf.namelist()):
-            root = _read_part(zf, name)
-            if root is not None:
-                _walk_part(root, label, state)
+        try:
+            _walk_part(body, "", state)
+            for name, label in _extra_parts(zf.namelist()):
+                root = _read_part(zf, name)
+                if root is None:
+                    continue
+                if label in ("脚注", "尾注"):
+                    # label each note with its visible 1-based number so the
+                    # location column reads "脚注2" rather than a paragraph
+                    # index across the whole footnotes story
+                    note_tag = _FOOTNOTE if label == "脚注" else _ENDNOTE
+                    n = 0
+                    for note in root:
+                        if note.tag != note_tag or note.get(_TYPE) in _SEPARATOR_TYPES:
+                            continue
+                        n += 1
+                        _walk_part(note, f"{label}{n}", state)
+                else:
+                    _walk_part(root, label, state)
+        except RecursionError as exc:
+            raise DocxReviewError(f"{p.name} 的文档结构嵌套过深，无法解析") from exc
 
         comments_root = _read_part(zf, "word/comments.xml")
         ext_root = _read_part(zf, "word/commentsExtended.xml")
@@ -523,7 +545,7 @@ def extract_review(path: "str | Path") -> Review:
     body_part = state.parts[""]
 
     by_para_id = {c.para_id: c for c in all_comments if c.para_id}
-    top: List[Comment] = []
+    top: list[Comment] = []
     for c in all_comments:
         c.quoted = state.quoted.get(c.id, "")
         part_label, idx = state.anchor.get(c.id, ("", None))

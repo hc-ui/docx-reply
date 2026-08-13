@@ -1,9 +1,9 @@
 import json
 
 import pytest
+from conftest import anchored, comment_xml, p, r, write_docx
 
 from docx_reply.cli import main
-from conftest import anchored, comment_xml, p, r, write_docx
 
 
 def reviewed_docx(tmp_path):
@@ -87,8 +87,7 @@ def test_redirected_stdout_is_utf8(tmp_path):
     path = reviewed_docx(tmp_path)
     res = subprocess.run(
         [sys.executable, "-m", "docx_reply", str(path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     assert res.returncode == 0
     text = res.stdout.decode("utf-8")  # must not raise on Windows (GBK console)

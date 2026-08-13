@@ -2,9 +2,9 @@
 
 import json
 
-from docx_reply import extract_review, render_json, render_markdown
 from conftest import anchored, comment_xml, footnotes_part, header_part, p, r
 
+from docx_reply import extract_review, render_json, render_markdown
 
 # ------------------------------------------------- comments beyond the body
 
@@ -21,11 +21,11 @@ def test_comment_in_footnote(docx_factory):
     review = extract_review(path)
     assert len(review.comments) == 1
     c = review.comments[0]
-    assert c.part == "脚注"
+    assert c.part == "脚注1"
     assert c.quoted == "脚注里的引文"
     assert c.para_text == "脚注里的引文"
     md = render_markdown(review)
-    assert "脚注 · 第1段" in md
+    assert "脚注1 · 第1段" in md
 
 
 def test_comment_in_header(docx_factory):
@@ -64,7 +64,7 @@ def test_revision_in_footnote_carries_part(docx_factory):
     path = docx_factory(p(r("正文。")), extra_parts={"word/footnotes.xml": footnotes})
     review = extract_review(path)
     assert len(review.revisions) == 1
-    assert review.revisions[0].part == "脚注"
+    assert review.revisions[0].part == "脚注1"
     assert review.revisions[0].text == "补充的脚注"
     # body paragraph count is not affected by footnote paragraphs
     assert review.paragraph_count == 1
@@ -80,7 +80,7 @@ def test_json_part_field(docx_factory):
         extra_parts={"word/footnotes.xml": footnotes},
     )
     payload = json.loads(render_json(extract_review(path)))
-    assert payload["comments"][0]["part"] == "脚注"
+    assert payload["comments"][0]["part"] == "脚注1"
 
 
 # ------------------------------------------------- format revisions

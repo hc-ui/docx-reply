@@ -10,18 +10,18 @@ from .render import (
     render_revisions_csv,
 )
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 __all__ = [
-    "extract_review",
-    "DocxReviewError",
     "Comment",
-    "Revision",
+    "DocxReviewError",
     "Review",
-    "render_markdown",
-    "render_comments_csv",
-    "render_revisions_csv",
-    "render_json",
-    "render_docx",
+    "Revision",
     "__version__",
+    "extract_review",
+    "render_comments_csv",
+    "render_docx",
+    "render_json",
+    "render_markdown",
+    "render_revisions_csv",
 ]
