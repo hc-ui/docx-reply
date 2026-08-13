@@ -18,12 +18,14 @@ from .render import (
 
 
 def main(argv: "list[str] | None" = None) -> int:
-    # Never crash on a console that cannot display some characters
-    # (e.g. Chinese text on a non-Chinese Windows console).
+    # Emit UTF-8 regardless of the console code page, so that redirecting
+    # stdout to a file (docx-reply x.docx > out.md) yields a UTF-8 file on
+    # Windows too instead of a locale-encoded (e.g. GBK) one; and never
+    # crash on a console that cannot display some characters.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             try:
-                stream.reconfigure(errors="replace")
+                stream.reconfigure(encoding="utf-8", errors="replace")
             except (ValueError, OSError):
                 pass
 

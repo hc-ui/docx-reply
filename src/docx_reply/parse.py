@@ -44,6 +44,7 @@ _DELTEXT = _q(_W, "delText")
 _TAB = _q(_W, "tab")
 _BR = _q(_W, "br")
 _CR = _q(_W, "cr")
+_NBHYPHEN = _q(_W, "noBreakHyphen")
 _INS = _q(_W, "ins")
 _DEL = _q(_W, "del")
 _MOVE_FROM = _q(_W, "moveFrom")
@@ -112,6 +113,8 @@ def _run_text(run: ET.Element) -> str:
             parts.append(child.text or "")
         elif child.tag in (_TAB, _BR, _CR):
             parts.append(" ")
+        elif child.tag == _NBHYPHEN:
+            parts.append("-")
     return "".join(parts)
 
 
@@ -195,6 +198,8 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
                 pd.headings.append((cur_idx, text))
             pch = paragraph_child(el, _PPR, _PPRCHANGE)
             if pch is not None and text:
+                # sentinel span: paragraph-level format changes must never
+                # be folded together with run-level ones
                 state.add_revision(
                     Revision(
                         kind="format",
@@ -204,7 +209,7 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
                         para_index=cur_idx,
                         part=label,
                     ),
-                    (clock[0], clock[0]),
+                    (-1, -1),
                 )
             for buf in open_ranges.values():
                 buf.append(" ")
@@ -290,7 +295,7 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
                                 para_index=cur_idx,
                                 part=label,
                             ),
-                            (clock[0], clock[0]),
+                            (clock[0] - 1, clock[0]),
                         )
         elif tag == _M_R:
             # math run: linearize m:t fragments so formulas survive
@@ -321,10 +326,16 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
                 visit(child, in_del, rev_buf)
 
     visit(container, False, None)
+    # a range start without a matching end (malformed producer): best-effort
+    # quoted text up to the end of the story instead of silently nothing
+    for cid, buf in open_ranges.items():
+        state.quoted.setdefault(cid, _collapse("".join(buf)))
     pd.headings.sort(key=lambda h: h[0])
 
 
-def _merge_replacements(revisions: List[Revision], spans: List[Tuple[int, int]]) -> List[Revision]:
+def _merge_replacements(
+    revisions: List[Revision], spans: List[Tuple[int, int]]
+) -> Tuple[List[Revision], List[Tuple[int, int]]]:
     """Fold a del+ins pair with no text between them into one "replace".
 
     Selecting text in Word and typing over it records exactly this pair
@@ -332,6 +343,7 @@ def _merge_replacements(revisions: List[Revision], spans: List[Tuple[int, int]])
     in a response table than two disconnected rows.
     """
     merged: List[Revision] = []
+    mspans: List[Tuple[int, int]] = []
     i = 0
     while i < len(revisions):
         cur = revisions[i]
@@ -360,33 +372,45 @@ def _merge_replacements(revisions: List[Revision], spans: List[Tuple[int, int]])
                         inserted=inserted,
                     )
                 )
+                mspans.append((spans[i][0], spans[i + 1][1]))
                 i += 2
                 continue
         merged.append(cur)
+        mspans.append(spans[i])
         i += 1
-    return merged
+    return merged, mspans
 
 
-def _merge_format_runs(revisions: List[Revision]) -> List[Revision]:
-    """Combine consecutive format revisions on the same paragraph.
+def _merge_format_runs(
+    revisions: List[Revision], spans: List[Tuple[int, int]]
+) -> List[Revision]:
+    """Combine adjacent format-revision fragments into one row.
 
-    One formatting action in Word (e.g. bolding a sentence) may split into
-    many runs; a single row per author+paragraph reads much better.
+    One formatting action in Word (e.g. bolding a sentence) splits into as
+    many runs as the sentence had; those fragments are adjacent on the run
+    clock. Two separate formatted ranges in the same paragraph have plain
+    text between them (non-adjacent spans) and stay separate rows.
     """
     merged: List[Revision] = []
-    for rev in revisions:
-        prev = merged[-1] if merged else None
-        if (
-            prev is not None
-            and rev.kind == "format"
-            and prev.kind == "format"
-            and rev.author == prev.author
-            and rev.part == prev.part
-            and rev.para_index == prev.para_index
-        ):
-            prev.text = _collapse(prev.text + rev.text)
-            continue
+    mspans: List[Tuple[int, int]] = []
+    for rev, span in zip(revisions, spans):
+        if merged:
+            prev = merged[-1]
+            pspan = mspans[-1]
+            if (
+                rev.kind == "format"
+                and prev.kind == "format"
+                and span != (-1, -1)
+                and pspan[1] == span[0]
+                and rev.author == prev.author
+                and rev.part == prev.part
+                and rev.para_index == prev.para_index
+            ):
+                prev.text = _collapse(prev.text + rev.text)
+                mspans[-1] = (pspan[0], span[1])
+                continue
         merged.append(rev)
+        mspans.append(span)
     return merged
 
 
@@ -441,12 +465,14 @@ def _extra_parts(names: List[str]) -> List[Tuple[str, str]]:
     """(zip name, display label) for footnote/endnote/header/footer parts."""
     found = [n for n in names if _EXTRA_PART_RE.match(n)]
 
-    def sort_key(name: str) -> Tuple[int, str]:
+    def sort_key(name: str) -> Tuple[int, int, str]:
         stem = name[len("word/") : -len(".xml")]
         for pos, (prefix, _) in enumerate(_PART_LABELS):
             if stem.startswith(prefix):
-                return (pos, name)
-        return (len(_PART_LABELS), name)
+                suffix = stem[len(prefix) :]
+                # natural order: header2.xml before header10.xml
+                return (pos, int(suffix) if suffix.isdigit() else 0, name)
+        return (len(_PART_LABELS), 0, name)
 
     out: List[Tuple[str, str]] = []
     for name in sorted(found, key=sort_key):
@@ -517,8 +543,8 @@ def extract_review(path: "str | Path") -> Review:
     big = 10**9
     top.sort(key=lambda c: state.anchor_order.get(c.id, big))
 
-    revisions = _merge_replacements(state.revisions, state.rev_spans)
-    revisions = _merge_format_runs(revisions)
+    revisions, spans = _merge_replacements(state.revisions, state.rev_spans)
+    revisions = _merge_format_runs(revisions, spans)
     for rev in revisions:
         pd = state.parts.get(rev.part, body_part)
         rev.para_text = pd.text_at(rev.para_index)

@@ -133,6 +133,73 @@ def test_ruby_base_kept_annotation_dropped(docx_factory):
     assert review2.comments[0].quoted == "拼音正文"
 
 
+# ------------------------------------------------- format-merge precision
+
+
+def _fmt_run(text: str, author: str = "王老师") -> str:
+    return (
+        f'<w:r><w:rPr><w:rPrChange w:id="40" w:author="{author}" '
+        'w:date="2026-08-11T05:00:00Z"><w:rPr/></w:rPrChange></w:rPr>'
+        f"<w:t>{text}</w:t></w:r>"
+    )
+
+
+def test_two_separate_format_ranges_stay_separate(docx_factory):
+    # "AAA"(formatted) + plain text + "CCC"(formatted) are two distinct
+    # formatting actions: they must not collapse into a misleading "AAACCC"
+    body = p(_fmt_run("AAA") + r("中间普通文字") + _fmt_run("CCC"))
+    review = extract_review(docx_factory(body))
+    assert [rev.text for rev in review.revisions] == ["AAA", "CCC"]
+
+
+def test_fragmented_format_range_still_merges(docx_factory):
+    body = p(_fmt_run("一句被") + _fmt_run("拆碎的话"))
+    review = extract_review(docx_factory(body))
+    assert [rev.text for rev in review.revisions] == ["一句被拆碎的话"]
+
+
+# ------------------------------------------------- misc robustness
+
+
+def test_header_files_in_natural_order(docx_factory):
+    from conftest import header_part
+
+    headers = {
+        "word/header1.xml": header_part(p(anchored("眉一", "1"))),
+        "word/header2.xml": header_part(p(anchored("眉二", "2"))),
+        "word/header10.xml": header_part(p(anchored("眉十", "3"))),
+    }
+    path = docx_factory(
+        p(r("正文。")),
+        comments=comment_xml("1", "A", "评一", para_id="A1")
+        + comment_xml("2", "A", "评二", para_id="A2")
+        + comment_xml("3", "A", "评三", para_id="A3"),
+        extra_parts=headers,
+    )
+    review = extract_review(path)
+    idx = {c.id: c.para_index for c in review.comments}
+    # header2 comes before header10 (natural, not lexicographic, order)
+    assert idx["1"] < idx["2"] < idx["3"]
+
+
+def test_unterminated_comment_range_gets_best_effort_quote(docx_factory):
+    body = p('<w:commentRangeStart w:id="0"/>' + r("没有终点的范围"))
+    review = extract_review(docx_factory(body, comment_xml("0", "A", "评")))
+    assert review.comments[0].quoted == "没有终点的范围"
+
+
+def test_no_break_hyphen_kept(docx_factory):
+    # verify via a comment anchored on the paragraph
+    body2 = p(
+        '<w:commentRangeStart w:id="0"/>'
+        "<w:r><w:t>state</w:t><w:noBreakHyphen/><w:t>art</w:t></w:r>"
+        '<w:commentRangeEnd w:id="0"/>'
+        '<w:r><w:commentReference w:id="0"/></w:r>'
+    )
+    review2 = extract_review(docx_factory(body2, comment_xml("0", "A", "评")))
+    assert review2.comments[0].quoted == "state-art"
+
+
 # ------------------------------------------------- docx output schema
 
 

@@ -77,3 +77,19 @@ def test_version_flag(capsys):
         main(["--version"])
     assert exc.value.code == 0
     assert "docx-reply" in capsys.readouterr().out
+
+
+def test_redirected_stdout_is_utf8(tmp_path):
+    """docx-reply x.docx > out.md must yield UTF-8 bytes on any platform."""
+    import subprocess
+    import sys
+
+    path = reviewed_docx(tmp_path)
+    res = subprocess.run(
+        [sys.executable, "-m", "docx_reply", str(path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert res.returncode == 0
+    text = res.stdout.decode("utf-8")  # must not raise on Windows (GBK console)
+    assert "深度学习模型取得了显著进展" in text
