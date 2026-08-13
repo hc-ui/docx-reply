@@ -1,8 +1,6 @@
 # docx-reply
 
 [![CI](https://github.com/hc-ui/docx-reply/actions/workflows/ci.yml/badge.svg)](https://github.com/hc-ui/docx-reply/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/docx-reply)](https://pypi.org/project/docx-reply/)
-[![Python](https://img.shields.io/pypi/pyversions/docx-reply)](https://pypi.org/project/docx-reply/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **把 Word 批注和修订一键导出成"修改对照表"。**
@@ -25,10 +23,10 @@ Turn the review comments, threaded replies and tracked changes inside a Word doc
 ## 安装
 
 ```bash
-pip install docx-reply
+pip install git+https://github.com/hc-ui/docx-reply.git
 ```
 
-无任何第三方依赖，Python 3.9+，支持 Microsoft Word 与 WPS Office 产生的文档。
+无任何第三方依赖，Python 3.9+，支持 Microsoft Word 与 WPS Office 产生的文档。（PyPI 包名 `docx-reply` 上架中，上架后可直接 `pip install docx-reply`。）
 
 ## 使用
 
