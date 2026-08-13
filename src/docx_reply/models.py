@@ -25,6 +25,7 @@ class Comment:
     quoted: str = ""
     para_index: Optional[int] = None
     para_text: str = ""
+    heading: str = ""
     resolved: bool = False
     replies: List["Comment"] = field(default_factory=list)
 
@@ -41,6 +42,7 @@ class Comment:
             "quoted": self.quoted,
             "paragraph": None if self.para_index is None else self.para_index + 1,
             "paragraph_text": self.para_text,
+            "heading": self.heading or None,
             "resolved": self.resolved,
             "replies": [r.to_dict() for r in self.replies],
         }
@@ -48,28 +50,42 @@ class Comment:
 
 @dataclass
 class Revision:
-    """One tracked change (insertion or deletion)."""
+    """One tracked change: insertion, deletion, or a merged replacement.
 
-    kind: str  # "insert" | "delete"
+    For ``kind == "replace"`` (a deletion immediately followed by an
+    insertion by the same author, i.e. select-and-retype in Word),
+    ``deleted``/``inserted`` hold both sides and ``text`` a readable
+    ``old → new`` form.
+    """
+
+    kind: str  # "insert" | "delete" | "replace"
     author: str
     date: str
     text: str
     para_index: Optional[int] = None
     para_text: str = ""
+    heading: str = ""
+    deleted: Optional[str] = None
+    inserted: Optional[str] = None
 
     @property
     def date_short(self) -> str:
         return _short_date(self.date)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "kind": self.kind,
             "author": self.author,
             "date": self.date,
             "text": self.text,
             "paragraph": None if self.para_index is None else self.para_index + 1,
             "paragraph_text": self.para_text,
+            "heading": self.heading or None,
         }
+        if self.kind == "replace":
+            d["deleted"] = self.deleted
+            d["inserted"] = self.inserted
+        return d
 
 
 def _count(comments: List[Comment]) -> int:

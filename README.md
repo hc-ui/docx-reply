@@ -15,11 +15,11 @@ Turn the review comments, threaded replies and tracked changes inside a Word doc
 
 `docx-reply` 直接读取 `.docx` 内部的批注数据，一条命令生成带"修改说明"空列的对照表：
 
-- **批注全要素**：批注人、日期、批注内容、被批注的原文（精确到批注框选的文字）、所在段落
+- **批注全要素**：批注人、日期、批注内容、被批注的原文（精确到批注框选的文字）、所在位置（最近标题 + 段号，如"第3章 图像识别方法 · 第2段"）
 - **回复线程**：学生/合作者对批注的回复原样带出，主批注与回复不混淆
-- **解决状态**：Word 里"标记为已解决"的批注自动标注，方便过滤已处理项
-- **修订记录**：审阅模式下的插入/删除（w:ins / w:del）单独成表，谁改了什么一目了然
-- **三种输出**：Markdown 表格（默认）、CSV（带 BOM，Excel/WPS 双击直接打开不乱码）、JSON（供脚本处理）
+- **解决状态**：Word 里"标记为已解决"的批注自动标注，配合 `--skip-resolved` 过滤已处理项
+- **修订记录**：审阅模式下的插入/删除单独成表；"选中旧词改新词"产生的紧邻删除+插入自动合并为一条"替换：旧词 → 新词"
+- **四种输出**：Markdown 表格（默认）、CSV（带 BOM，Excel/WPS 双击直接打开不乱码）、JSON（供脚本处理）、**Word 版对照表（.docx，填完直接提交）**
 
 ## 安装
 
@@ -35,14 +35,17 @@ pip install docx-reply
 # 生成 Markdown 修改对照表
 docx-reply 论文_导师批注.docx -o 修改对照表.md
 
+# 生成 Word 版对照表，填完"修改说明"直接提交
+docx-reply 论文_导师批注.docx -f docx -o 修改对照表.docx
+
 # 生成 CSV（Excel/WPS 直接打开；修订另存为 修改对照表.revisions.csv）
 docx-reply 论文_导师批注.docx -f csv -o 修改对照表.csv
 
 # JSON 输出，供脚本/AI 工作流使用
 docx-reply 论文_导师批注.docx -f json
 
-# 只要批注、不要修订记录
-docx-reply 论文_导师批注.docx --no-revisions
+# 只看某位审阅人的意见；跳过已解决的批注；不要修订记录
+docx-reply 论文_导师批注.docx --author 王老师 --skip-resolved --no-revisions
 ```
 
 对仓库自带的 [examples/sample.docx](examples/sample.docx) 运行 `docx-reply examples/sample.docx`，输出：
@@ -50,22 +53,23 @@ docx-reply 论文_导师批注.docx --no-revisions
 ```markdown
 # 审阅意见对照表：sample.docx
 
-批注 3 条（含回复 1 条） ｜ 修订 2 处 ｜ 审阅人：王老师、李同学
+批注 3 条（含回复 1 条） ｜ 修订 1 处 ｜ 审阅人：王老师、李同学
 
 ## 批注（修改对照表）
 
 | 序号 | 位置 | 原文摘录 | 批注人 | 日期 | 批注内容 | 回复 | 状态 | 修改说明 |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 第2段 | 深度学习模型在图像识别领域取得了显著进展 | 王老师 | 2026-08-10 | 这一段缺少对相关工作的引用，请补充 2-3 篇近三年文献。 | 李同学：已补充引用[15]-[17]。 | 未解决 |  |
-| 2 | 第4段 | 实验结果如图3-1所示 | 王老师 | 2026-08-10 | 图3-1 的分辨率太低，请替换为矢量图。 |  | 已解决 |  |
+| 1 | 第3章 图像识别方法 · 第2段 | 深度学习模型在图像识别领域取得了显著进展 | 王老师 | 2026-08-10 | 这一段缺少对相关工作的引用，请补充 2-3 篇近三年文献。 | 李同学：已补充引用[15]-[17]。 | 未解决 |  |
+| 2 | 第3章 图像识别方法 · 第4段 | 实验结果如图3-1所示 | 王老师 | 2026-08-10 | 图3-1 的分辨率太低，请替换为矢量图。 |  | 已解决 |  |
 
 ## 修订记录
 
 | 序号 | 位置 | 类型 | 作者 | 日期 | 内容 |
 | ---: | --- | --- | --- | --- | --- |
-| 1 | 第3段 | 插入 | 王老师 | 2026-08-11 | 显著 |
-| 2 | 第3段 | 删除 | 王老师 | 2026-08-11 | 非常 |
+| 1 | 第3章 图像识别方法 · 第3段 | 替换 | 王老师 | 2026-08-11 | 非常 → 显著 |
 ```
+
+注意"选中'非常'改成'显著'"这类操作在 Word 内部是一条删除加一条插入，`docx-reply` 会自动识别紧邻的成对修订并合并为一条"替换"，表格更接近人的阅读习惯。
 
 最后一列"修改说明"留空，填完即可直接提交给导师或审稿人。
 
@@ -90,18 +94,21 @@ JSON 结构（`-f json`）：
 ```json
 {
   "source": "sample.docx",
-  "stats": {"comments": 3, "replies": 1, "resolved": 1, "revisions": 2, "authors": ["王老师", "李同学"]},
+  "stats": {"comments": 3, "replies": 1, "resolved": 1, "revisions": 1, "authors": ["王老师", "李同学"]},
   "comments": [
     {
       "author": "王老师",
       "text": "这一段缺少对相关工作的引用，请补充 2-3 篇近三年文献。",
       "quoted": "深度学习模型在图像识别领域取得了显著进展",
       "paragraph": 2,
+      "heading": "第3章 图像识别方法",
       "resolved": false,
       "replies": [{"author": "李同学", "text": "已补充引用[15]-[17]。"}]
     }
   ],
-  "revisions": [{"kind": "insert", "author": "王老师", "text": "显著", "paragraph": 3}]
+  "revisions": [
+    {"kind": "replace", "author": "王老师", "text": "非常 → 显著", "deleted": "非常", "inserted": "显著", "paragraph": 3}
+  ]
 }
 ```
 
@@ -113,29 +120,33 @@ JSON 结构（`-f json`）：
 | docx2python | Python 库 | 面向开发者的正文抽取，无回复线程/解决状态/对照表输出 |
 | docx-review (Rust) | 开发者 CLI | 输出原始 JSON，面向自动化管线，需要 cargo 安装 |
 | docxreview / docxtractr (R) | R 包 | 需要 R 环境 |
-| **docx-reply** | **pip CLI + 库** | **一条命令直接得到可填写的中文修改对照表，含回复线程、解决状态、修订表；零依赖** |
+| **docx-reply** | **pip CLI + 库** | **一条命令直接得到可填写的修改对照表（含 Word 版 .docx 输出），回复线程、解决状态、替换合并、标题定位；零依赖** |
 
 ## Features (English)
 
-- **Made for the revision-response workflow.** The default output is a fillable response table (修改对照表) — the exact artifact students and authors must produce after receiving a reviewed manuscript — not a raw data dump.
-- **Complete comment model.** Anchored text (exactly what the reviewer selected), containing paragraph, threaded replies from `commentsExtended.xml`, and the resolved flag.
-- **Tracked changes included.** Insertions and deletions (`w:ins` / `w:del`) with author and date; moved text is handled correctly (visible exactly once, in its new place).
+- **Made for the revision-response workflow.** The default output is a fillable response table (修改对照表) — the exact artifact students and authors must produce after receiving a reviewed manuscript — not a raw data dump. `-f docx` even writes the table as a Word document ready to hand in.
+- **Complete comment model.** Anchored text (exactly what the reviewer selected), heading-based location, threaded replies from `commentsExtended.xml`, and the resolved flag.
+- **Tracked changes, humanized.** Insertions and deletions (`w:ins` / `w:del`) with author and date; an adjacent delete+insert pair by the same author (select-and-retype in Word) is folded into a single readable `old → new` replacement. Moved text is handled correctly (visible exactly once, in its new place).
+- **Filters.** `--author 王老师` and `--skip-resolved` narrow the table to what still needs action.
 - **Excel-friendly CSV.** Written with a UTF-8 BOM so Chinese text opens correctly in Excel and WPS by double-clicking.
 - **Zero dependencies.** Pure standard library (`zipfile` + `xml.etree`), Python 3.9+, offline, cross-platform, console-encoding safe on Windows.
 - **Scriptable.** `--format json` plus a small typed API (`extract_review`, `Review`, `Comment`, `Revision`).
 
 ## 局限与说明
 
-- 位置以"第 N 段"表示（按文档内全部段落顺序计）。`.docx` 文件里没有页码——页码是排版时才产生的，任何不调用 Word 排版引擎的工具都无法给出准确页码。
+- 位置以"最近标题 · 第 N 段"表示（段号按文档内全部段落顺序计）。`.docx` 文件里没有页码——页码是排版时才产生的，任何不调用 Word 排版引擎的工具都无法给出准确页码。
+- 标题识别基于 Word/WPS 内置标题样式（Heading 1-9 / 标题 1-9）；纯手工加粗放大的"标题"无法识别，此时退回纯段号。
 - 目前只处理正文（`document.xml`）中的批注与修订；页眉/页脚/脚注中的批注、移动修订（moveFrom/moveTo）的独立列出、格式修订暂不支持，见 [Roadmap](#roadmap)。
 - 老式 `.doc` 二进制格式不支持，请先在 Word/WPS 中另存为 `.docx`。
 
 ## Roadmap
 
-- [ ] 按最近标题定位（"第3章 > 第2段"），替代纯段号
-- [ ] `--author` / `--skip-resolved` 过滤
-- [ ] 直接输出 `.docx` 格式的修改对照表
+- [x] 按最近标题定位（"第3章 · 第2段"）— v0.2.0
+- [x] `--author` / `--skip-resolved` 过滤 — v0.2.0
+- [x] 直接输出 `.docx` 格式的修改对照表 — v0.2.0
+- [x] 紧邻删除+插入合并为"替换" — v0.2.0
 - [ ] 脚注/页眉页脚中的批注；移动/格式修订
+- [ ] 修改说明列的 AI 草拟（对接本地 LLM）
 
 ## 贡献
 

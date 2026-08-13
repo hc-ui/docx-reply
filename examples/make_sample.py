@@ -34,7 +34,7 @@ RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 
 DOCUMENT = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document {NS}><w:body>
-<w:p><w:r><w:t>第3章 基于深度学习的图像识别方法</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第3章 图像识别方法</w:t></w:r></w:p>
 <w:p>
   <w:commentRangeStart w:id="0"/>
   <w:r><w:t>深度学习模型在图像识别领域取得了显著进展</w:t></w:r>

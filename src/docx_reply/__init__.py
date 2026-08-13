@@ -2,9 +2,15 @@
 
 from .models import Comment, Review, Revision
 from .parse import DocxReviewError, extract_review
-from .render import render_comments_csv, render_json, render_markdown, render_revisions_csv
+from .render import (
+    render_comments_csv,
+    render_docx,
+    render_json,
+    render_markdown,
+    render_revisions_csv,
+)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "extract_review",
@@ -16,5 +22,6 @@ __all__ = [
     "render_comments_csv",
     "render_revisions_csv",
     "render_json",
+    "render_docx",
     "__version__",
 ]

@@ -8,7 +8,13 @@ from pathlib import Path
 
 from . import __version__
 from .parse import DocxReviewError, extract_review
-from .render import render_comments_csv, render_json, render_markdown, render_revisions_csv
+from .render import (
+    render_comments_csv,
+    render_docx,
+    render_json,
+    render_markdown,
+    render_revisions_csv,
+)
 
 
 def main(argv: "list[str] | None" = None) -> int:
@@ -30,14 +36,26 @@ def main(argv: "list[str] | None" = None) -> int:
     parser.add_argument(
         "-f",
         "--format",
-        choices=("md", "csv", "json"),
+        choices=("md", "csv", "json", "docx"),
         default="md",
-        help="输出格式：md 修改对照表（默认）/ csv 表格（Excel、WPS 可直接打开）/ json 机器可读",
+        help="输出格式：md 修改对照表（默认）/ csv 表格（Excel、WPS 可直接打开）/ "
+        "json 机器可读 / docx Word 版对照表（需配合 -o）",
     )
     parser.add_argument("-o", "--output", help="结果写入该文件（默认打印到标准输出）")
     parser.add_argument("--no-revisions", action="store_true", help="不输出修订记录（插入/删除）")
+    parser.add_argument(
+        "--author",
+        action="append",
+        metavar="姓名",
+        help="只保留指定批注人/修订作者的记录，可重复使用",
+    )
+    parser.add_argument("--skip-resolved", action="store_true", help="跳过已标记为解决的批注")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
+
+    if args.format == "docx" and not args.output:
+        print("错误：-f docx 需要用 -o 指定输出文件，例如 -o 修改对照表.docx", file=sys.stderr)
+        return 2
 
     try:
         review = extract_review(args.input)
@@ -47,6 +65,22 @@ def main(argv: "list[str] | None" = None) -> int:
 
     if args.no_revisions:
         review.revisions = []
+    if args.author:
+        wanted = set(args.author)
+        review.comments = [c for c in review.comments if c.author in wanted]
+        review.revisions = [r for r in review.revisions if r.author in wanted]
+    if args.skip_resolved:
+        review.comments = [c for c in review.comments if not c.resolved]
+
+    if args.format == "docx":
+        out = Path(args.output)
+        out.write_bytes(render_docx(review))
+        print(f"已写入 {out}", file=sys.stderr)
+        print(
+            f"共 {review.total_comments} 条批注（含 {review.reply_count} 条回复）、{len(review.revisions)} 处修订",
+            file=sys.stderr,
+        )
+        return 0
 
     if args.format == "md":
         content = render_markdown(review)

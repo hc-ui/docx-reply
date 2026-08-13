@@ -57,8 +57,15 @@ _EX = _q(_W15, "commentEx")
 _EX_PARA = _q(_W15, "paraId")
 _EX_PARENT = _q(_W15, "paraIdParent")
 _EX_DONE = _q(_W15, "done")
+_PPR = _q(_W, "pPr")
+_PSTYLE = _q(_W, "pStyle")
+_VAL = _q(_W, "val")
 
 _WS_RE = re.compile(r"\s+")
+
+# Style ids Word/WPS use for built-in heading styles: "Heading1", "1"
+# (Chinese Word), "标题 1". Anything else is treated as body text.
+_HEADING_STYLE_RE = re.compile(r"^(?:heading\s*[1-9]|标题\s*[1-9]|[1-9])$", re.IGNORECASE)
 
 
 class DocxReviewError(Exception):
@@ -88,6 +95,22 @@ class _DocumentData:
         self.anchor_para: Dict[str, Optional[int]] = {}
         self.anchor_order: Dict[str, int] = {}
         self.revisions: List[Revision] = []
+        # (paragraph index, heading text) in document order
+        self.headings: List[Tuple[int, str]] = []
+        # revision -> (start, end) positions of the text-run counter,
+        # used to detect truly adjacent del+ins pairs (replacements)
+        self.rev_spans: List[Tuple[int, int]] = []
+
+    def nearest_heading(self, idx: Optional[int]) -> str:
+        if idx is None:
+            return ""
+        best = ""
+        for h_idx, h_text in self.headings:
+            if h_idx <= idx:
+                best = h_text
+            else:
+                break
+        return best
 
 
 def _walk_document(root: ET.Element) -> _DocumentData:
@@ -102,10 +125,21 @@ def _walk_document(root: ET.Element) -> _DocumentData:
     order = itertools.count()
     cur_idx: Optional[int] = None
     cur_texts: Optional[List[str]] = None
+    # counts text-bearing runs; two revisions with touching spans have no
+    # document text between them and can form a replacement pair
+    run_clock = [0]
 
     def anchor(cid: str) -> None:
         data.anchor_para.setdefault(cid, cur_idx)
         data.anchor_order.setdefault(cid, next(order))
+
+    def paragraph_style(el: ET.Element) -> str:
+        ppr = el.find(_PPR)
+        if ppr is not None:
+            pstyle = ppr.find(_PSTYLE)
+            if pstyle is not None:
+                return pstyle.get(_VAL, "")
+        return ""
 
     def visit(el: ET.Element, in_del: bool, rev_buf: Optional[List[str]]) -> None:
         nonlocal cur_idx, cur_texts
@@ -117,7 +151,10 @@ def _walk_document(root: ET.Element) -> _DocumentData:
             cur_texts = []
             for child in el:
                 visit(child, in_del, rev_buf)
-            data.paragraphs[cur_idx] = _collapse("".join(cur_texts))
+            text = _collapse("".join(cur_texts))
+            data.paragraphs[cur_idx] = text
+            if text and _HEADING_STYLE_RE.match(paragraph_style(el)):
+                data.headings.append((cur_idx, text))
             for buf in open_ranges.values():
                 buf.append(" ")
             cur_idx, cur_texts = prev_idx, prev_texts
@@ -132,6 +169,7 @@ def _walk_document(root: ET.Element) -> _DocumentData:
                 data.quoted[cid] = _collapse("".join(buf))
         elif tag in (_INS, _MOVE_TO):
             buf: List[str] = []
+            start = run_clock[0]
             for child in el:
                 visit(child, in_del, buf)
             text = _collapse("".join(buf))
@@ -145,8 +183,10 @@ def _walk_document(root: ET.Element) -> _DocumentData:
                         para_index=cur_idx,
                     )
                 )
+                data.rev_spans.append((start, run_clock[0]))
         elif tag in (_DEL, _MOVE_FROM):
             del_buf: List[str] = []
+            start = run_clock[0]
             for child in el:
                 visit(child, True, del_buf)
             text = _collapse("".join(del_buf))
@@ -160,6 +200,7 @@ def _walk_document(root: ET.Element) -> _DocumentData:
                         para_index=cur_idx,
                     )
                 )
+                data.rev_spans.append((start, run_clock[0]))
         elif tag == _R:
             for child in el:
                 if child.tag == _REFERENCE:
@@ -167,6 +208,7 @@ def _walk_document(root: ET.Element) -> _DocumentData:
             text = _run_text(el)
             if not text:
                 return
+            run_clock[0] += 1
             if rev_buf is not None:
                 rev_buf.append(text)
             if not in_del:
@@ -180,7 +222,49 @@ def _walk_document(root: ET.Element) -> _DocumentData:
                 visit(child, in_del, rev_buf)
 
     visit(body, False, None)
+    data.headings.sort(key=lambda h: h[0])
     return data
+
+
+def _merge_replacements(revisions: List[Revision], spans: List[Tuple[int, int]]) -> List[Revision]:
+    """Fold a del+ins pair with no text between them into one "replace".
+
+    Selecting text in Word and typing over it records exactly this pair
+    (in either order); presenting it as ``old → new`` is far more readable
+    in a response table than two disconnected rows.
+    """
+    merged: List[Revision] = []
+    i = 0
+    while i < len(revisions):
+        cur = revisions[i]
+        if i + 1 < len(revisions):
+            nxt = revisions[i + 1]
+            adjacent = spans[i][1] == spans[i + 1][0]
+            complementary = {cur.kind, nxt.kind} == {"insert", "delete"}
+            if (
+                adjacent
+                and complementary
+                and cur.author == nxt.author
+                and cur.para_index == nxt.para_index
+            ):
+                deleted = cur.text if cur.kind == "delete" else nxt.text
+                inserted = cur.text if cur.kind == "insert" else nxt.text
+                merged.append(
+                    Revision(
+                        kind="replace",
+                        author=cur.author,
+                        date=cur.date,
+                        text=f"{deleted} → {inserted}",
+                        para_index=cur.para_index,
+                        deleted=deleted,
+                        inserted=inserted,
+                    )
+                )
+                i += 2
+                continue
+        merged.append(cur)
+        i += 1
+    return merged
 
 
 def _parse_comments(root: ET.Element) -> List[Comment]:
@@ -267,6 +351,7 @@ def extract_review(path: "str | Path") -> Review:
         c.quoted = data.quoted.get(c.id, "")
         c.para_index = data.anchor_para.get(c.id)
         c.para_text = para_text(c.para_index)
+        c.heading = data.nearest_heading(c.para_index)
         parent_pid, done = ext.get(c.para_id, (None, False)) if c.para_id else (None, False)
         c.resolved = done
         parent = by_para_id.get(parent_pid) if parent_pid else None
@@ -278,12 +363,14 @@ def extract_review(path: "str | Path") -> Review:
     big = 10**9
     top.sort(key=lambda c: data.anchor_order.get(c.id, big))
 
-    for rev in data.revisions:
+    revisions = _merge_replacements(data.revisions, data.rev_spans)
+    for rev in revisions:
         rev.para_text = para_text(rev.para_index)
+        rev.heading = data.nearest_heading(rev.para_index)
 
     return Review(
         source=p.name,
         paragraph_count=len(data.paragraphs),
         comments=top,
-        revisions=data.revisions,
+        revisions=revisions,
     )

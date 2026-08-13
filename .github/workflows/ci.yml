@@ -27,3 +27,5 @@ jobs:
           python examples/make_sample.py
           docx-reply examples/sample.docx
           docx-reply examples/sample.docx -f json
+          docx-reply examples/sample.docx -f docx -o table.docx
+          docx-reply examples/sample.docx --skip-resolved --author 王老师
