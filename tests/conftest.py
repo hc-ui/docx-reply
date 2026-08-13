@@ -23,7 +23,9 @@ RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 _NS = (
     'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
     'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" '
-    'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"'
+    'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" '
+    'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" '
+    'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"'
 )
 
 DOCUMENT_TMPL = (

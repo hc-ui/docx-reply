@@ -187,11 +187,14 @@ def _docx_table(headers: "list[str]", rows: "list[list[list[str]]]") -> str:
         f'<w:{side} w:val="single" w:sz="4" w:color="auto"/>'
         for side in ("top", "left", "bottom", "right", "insideH", "insideV")
     )
+    # w:tblGrid is required by the OOXML schema; widths are advisory here
+    # because the table itself is set to 100% width with auto layout
+    grid = "<w:tblGrid>" + "".join('<w:gridCol w:w="1200"/>' for _ in headers) + "</w:tblGrid>"
     parts = [
         "<w:tbl><w:tblPr>"
         '<w:tblW w:w="5000" w:type="pct"/>'
         f"<w:tblBorders>{borders}</w:tblBorders>"
-        "</w:tblPr>"
+        f"</w:tblPr>{grid}"
     ]
     parts.append("<w:tr>" + "".join(_docx_cell([h], bold=True) for h in headers) + "</w:tr>")
     for row in rows:

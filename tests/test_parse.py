@@ -151,7 +151,9 @@ def test_insert_and_delete_in_same_paragraph(docx_factory):
     assert review.revisions[0].para_text == "新增保留"
 
 
-def test_deleted_text_excluded_from_quoted(docx_factory):
+def test_quoted_keeps_text_a_reviewer_deleted(docx_factory):
+    # the comment was anchored on the original text; if a tracked deletion
+    # strikes part of it through, the quoted excerpt must not lose that part
     body = p(
         f'<w:commentRangeStart w:id="0"/>'
         + r("保留的")
@@ -163,7 +165,9 @@ def test_deleted_text_excluded_from_quoted(docx_factory):
     )
     comments = comment_xml("0", "王老师", "措辞再斟酌。")
     review = extract_review(docx_factory(body, comments))
-    assert review.comments[0].quoted == "保留的文字"
+    assert review.comments[0].quoted == "保留的被删的文字"
+    # the final paragraph text still excludes the deletion
+    assert review.comments[0].para_text == "保留的文字"
 
 
 def test_comments_sorted_by_document_position(docx_factory):

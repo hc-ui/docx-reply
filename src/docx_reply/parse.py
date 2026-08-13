@@ -28,6 +28,8 @@ from .models import Comment, Review, Revision
 _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _W14 = "http://schemas.microsoft.com/office/word/2010/wordml"
 _W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
+_MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+_M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
 
 def _q(ns: str, tag: str) -> str:
@@ -65,6 +67,19 @@ _VAL = _q(_W, "val")
 _RPR = _q(_W, "rPr")
 _RPRCHANGE = _q(_W, "rPrChange")
 _PPRCHANGE = _q(_W, "pPrChange")
+_DRAWING = _q(_W, "drawing")
+_PICT = _q(_W, "pict")
+_OBJECT = _q(_W, "object")
+_RUBY = _q(_W, "ruby")
+_RT = _q(_W, "rt")
+_ALTERNATE = _q(_MC, "AlternateContent")
+_MC_CHOICE = _q(_MC, "Choice")
+_MC_FALLBACK = _q(_MC, "Fallback")
+_M_R = _q(_M, "r")
+_M_T = _q(_M, "t")
+
+# Run children that may hold nested document content (text boxes, ruby text)
+_RUN_CONTAINERS = (_DRAWING, _PICT, _OBJECT, _ALTERNATE, _RUBY)
 
 _WS_RE = re.compile(r"\s+")
 
@@ -245,18 +260,23 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
             for child in el:
                 if child.tag == _REFERENCE:
                     anchor(child.get(_ID, ""))
+                elif child.tag in _RUN_CONTAINERS:
+                    # text boxes / ruby carry real paragraphs inside the run
+                    visit(child, in_del, rev_buf)
             text = _run_text(el)
             if not text:
                 return
             clock[0] += 1
             if rev_buf is not None:
                 rev_buf.append(text)
+            # quoted ranges reflect what the comment was anchored on, so
+            # they keep text that a tracked deletion has struck through
+            for buf in open_ranges.values():
+                buf.append(text)
             if not in_del:
                 # visible in the final document: plain text and insertions
                 if cur_texts is not None:
                     cur_texts.append(text)
-                for buf in open_ranges.values():
-                    buf.append(text)
                 if rev_buf is None:
                     # plain run: surface formatting-only revisions too
                     rch = paragraph_child(el, _RPR, _RPRCHANGE)
@@ -272,6 +292,30 @@ def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
                             ),
                             (clock[0], clock[0]),
                         )
+        elif tag == _M_R:
+            # math run: linearize m:t fragments so formulas survive
+            text = "".join(n.text or "" for n in el.iter(_M_T))
+            if not text:
+                return
+            clock[0] += 1
+            if rev_buf is not None:
+                rev_buf.append(text)
+            for buf in open_ranges.values():
+                buf.append(text)
+            if not in_del and cur_texts is not None:
+                cur_texts.append(text)
+        elif tag == _ALTERNATE:
+            # mc:Choice and mc:Fallback duplicate the same content
+            # (e.g. a text box as DrawingML and as legacy VML): walk one
+            target = el.find(_MC_CHOICE)
+            if target is None:
+                target = el.find(_MC_FALLBACK)
+            if target is not None:
+                for child in target:
+                    visit(child, in_del, rev_buf)
+        elif tag == _RT:
+            # phonetic guide annotation over ruby base text, not content
+            return
         else:
             for child in el:
                 visit(child, in_del, rev_buf)
@@ -352,7 +396,7 @@ def _parse_comments(root: ET.Element) -> List[Comment]:
         pieces: List[str] = []
         last_para_id: Optional[str] = None
         for p in c.findall(f".//{_P}"):
-            texts = [n.text or "" for n in p.iter() if n.tag in (_T, _DELTEXT)]
+            texts = [n.text or "" for n in p.iter() if n.tag in (_T, _DELTEXT, _M_T)]
             piece = _collapse("".join(texts))
             if piece:
                 pieces.append(piece)
