@@ -10,7 +10,7 @@ from xml.sax.saxutils import escape as _xml_escape
 
 from .models import Review
 
-_KIND_ZH = {"insert": "插入", "delete": "删除", "replace": "替换"}
+_KIND_ZH = {"insert": "插入", "delete": "删除", "replace": "替换", "move": "移动", "format": "格式"}
 
 COMMENT_HEADERS = ["序号", "位置", "原文摘录", "批注人", "日期", "批注内容", "回复", "状态", "修改说明"]
 REVISION_HEADERS = ["序号", "位置", "类型", "作者", "日期", "内容"]
@@ -29,14 +29,17 @@ def _cell(text: str) -> str:
 
 
 def _loc(item) -> str:
-    """Location of a comment/revision: ``2.1 实验设计 · 第14段``."""
+    """Location of a comment/revision: ``[脚注 ·] 2.1 实验设计 · 第14段``."""
     if item.para_index is None:
         return ""
-    para = f"第{item.para_index + 1}段"
+    pieces = []
+    if getattr(item, "part", ""):
+        pieces.append(item.part)
     heading = getattr(item, "heading", "")
     if heading:
-        return f"{_excerpt(heading, 24)} · {para}"
-    return para
+        pieces.append(_excerpt(heading, 24))
+    pieces.append(f"第{item.para_index + 1}段")
+    return " · ".join(pieces)
 
 
 def _status(resolved: bool) -> str:

@@ -26,6 +26,8 @@ class Comment:
     para_index: Optional[int] = None
     para_text: str = ""
     heading: str = ""
+    # document story holding the anchor: "" body, 脚注/尾注/页眉/页脚
+    part: str = ""
     resolved: bool = False
     replies: List["Comment"] = field(default_factory=list)
 
@@ -43,6 +45,7 @@ class Comment:
             "paragraph": None if self.para_index is None else self.para_index + 1,
             "paragraph_text": self.para_text,
             "heading": self.heading or None,
+            "part": self.part or None,
             "resolved": self.resolved,
             "replies": [r.to_dict() for r in self.replies],
         }
@@ -50,21 +53,24 @@ class Comment:
 
 @dataclass
 class Revision:
-    """One tracked change: insertion, deletion, or a merged replacement.
+    """One tracked change: insert, delete, replace, move or format.
 
     For ``kind == "replace"`` (a deletion immediately followed by an
     insertion by the same author, i.e. select-and-retype in Word),
     ``deleted``/``inserted`` hold both sides and ``text`` a readable
-    ``old → new`` form.
+    ``old → new`` form. For ``kind == "move"`` the text is reported once,
+    at its new location. For ``kind == "format"`` the text is unchanged
+    content whose formatting was modified.
     """
 
-    kind: str  # "insert" | "delete" | "replace"
+    kind: str  # "insert" | "delete" | "replace" | "move" | "format"
     author: str
     date: str
     text: str
     para_index: Optional[int] = None
     para_text: str = ""
     heading: str = ""
+    part: str = ""
     deleted: Optional[str] = None
     inserted: Optional[str] = None
 
@@ -81,6 +87,7 @@ class Revision:
             "paragraph": None if self.para_index is None else self.para_index + 1,
             "paragraph_text": self.para_text,
             "heading": self.heading or None,
+            "part": self.part or None,
         }
         if self.kind == "replace":
             d["deleted"] = self.deleted

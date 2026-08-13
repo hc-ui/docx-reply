@@ -42,7 +42,8 @@ COMMENTS_EX_TMPL = (
 )
 
 
-def write_docx(path, body, comments=None, comments_ex=None):
+def write_docx(path, body, comments=None, comments_ex=None, extra_parts=None):
+    """extra_parts: dict of zip name -> raw inner XML wrapped per part kind."""
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("[Content_Types].xml", CONTENT_TYPES)
         zf.writestr("_rels/.rels", RELS)
@@ -51,16 +52,34 @@ def write_docx(path, body, comments=None, comments_ex=None):
             zf.writestr("word/comments.xml", COMMENTS_TMPL.format(comments=comments))
         if comments_ex is not None:
             zf.writestr("word/commentsExtended.xml", COMMENTS_EX_TMPL.format(items=comments_ex))
+        for name, xml in (extra_parts or {}).items():
+            zf.writestr(name, xml)
     return path
+
+
+def footnotes_part(inner: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f"<w:footnotes {_NS}>{inner}</w:footnotes>"
+    )
+
+
+def header_part(inner: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f"<w:hdr {_NS}>{inner}</w:hdr>"
+    )
 
 
 @pytest.fixture
 def docx_factory(tmp_path):
     counter = {"n": 0}
 
-    def build(body, comments=None, comments_ex=None):
+    def build(body, comments=None, comments_ex=None, extra_parts=None):
         counter["n"] += 1
-        return write_docx(tmp_path / f"test{counter['n']}.docx", body, comments, comments_ex)
+        return write_docx(
+            tmp_path / f"test{counter['n']}.docx", body, comments, comments_ex, extra_parts
+        )
 
     return build
 

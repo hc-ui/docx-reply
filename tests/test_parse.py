@@ -184,7 +184,7 @@ def test_tab_and_break_become_space(docx_factory):
     assert review2.comments[0].para_text == "锚点"
 
 
-def test_move_to_visible_but_not_a_revision(docx_factory):
+def test_move_reported_once_at_new_location(docx_factory):
     body = p(
         '<w:moveTo w:id="20" w:author="A" w:date="2026-08-11T00:00:00Z">' + r("移动来的") + "</w:moveTo>"
         + r("正文")
@@ -192,7 +192,9 @@ def test_move_to_visible_but_not_a_revision(docx_factory):
         + "<w:r><w:delText>移走的</w:delText></w:r></w:moveFrom>"
     )
     review = extract_review(docx_factory(body))
-    assert review.revisions == []
+    # moveTo listed once as a "move"; moveFrom (old location) not repeated
+    assert [rev.kind for rev in review.revisions] == ["move"]
+    assert review.revisions[0].text == "移动来的"
     # final text keeps moveTo content and drops moveFrom content
     assert review.comments == []
     path2 = docx_factory(

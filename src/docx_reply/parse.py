@@ -1,9 +1,11 @@
 """Read review data (comments, replies, tracked changes) out of a .docx file.
 
 A .docx file is a zip archive of XML parts. Everything the review workflow
-needs lives in three of them:
+needs lives in a handful of them:
 
 - ``word/document.xml``          body text, comment anchors, tracked changes
+- ``word/footnotes.xml`` / ``word/endnotes.xml`` / ``word/header*.xml`` /
+  ``word/footer*.xml``           the same, for the other document stories
 - ``word/comments.xml``          comment text, author, date
 - ``word/commentsExtended.xml``  reply threading and "resolved" state
 
@@ -60,12 +62,24 @@ _EX_DONE = _q(_W15, "done")
 _PPR = _q(_W, "pPr")
 _PSTYLE = _q(_W, "pStyle")
 _VAL = _q(_W, "val")
+_RPR = _q(_W, "rPr")
+_RPRCHANGE = _q(_W, "rPrChange")
+_PPRCHANGE = _q(_W, "pPrChange")
 
 _WS_RE = re.compile(r"\s+")
 
 # Style ids Word/WPS use for built-in heading styles: "Heading1", "1"
 # (Chinese Word), "标题 1". Anything else is treated as body text.
 _HEADING_STYLE_RE = re.compile(r"^(?:heading\s*[1-9]|标题\s*[1-9]|[1-9])$", re.IGNORECASE)
+
+# Document stories beyond the main body, in scan order.
+_EXTRA_PART_RE = re.compile(r"^word/(footnotes|endnotes|header\d*|footer\d*)\.xml$")
+_PART_LABELS = (
+    ("footnotes", "脚注"),
+    ("endnotes", "尾注"),
+    ("header", "页眉"),
+    ("footer", "页脚"),
+)
 
 
 class DocxReviewError(Exception):
@@ -86,20 +100,13 @@ def _run_text(run: ET.Element) -> str:
     return "".join(parts)
 
 
-class _DocumentData:
-    """Raw facts collected in a single walk over document.xml."""
+class _PartData:
+    """Paragraphs and headings of one document story (body, footnotes, …)."""
 
-    def __init__(self) -> None:
+    def __init__(self, label: str) -> None:
+        self.label = label
         self.paragraphs: List[str] = []
-        self.quoted: Dict[str, str] = {}
-        self.anchor_para: Dict[str, Optional[int]] = {}
-        self.anchor_order: Dict[str, int] = {}
-        self.revisions: List[Revision] = []
-        # (paragraph index, heading text) in document order
         self.headings: List[Tuple[int, str]] = []
-        # revision -> (start, end) positions of the text-run counter,
-        # used to detect truly adjacent del+ins pairs (replacements)
-        self.rev_spans: List[Tuple[int, int]] = []
 
     def nearest_heading(self, idx: Optional[int]) -> str:
         if idx is None:
@@ -112,49 +119,78 @@ class _DocumentData:
                 break
         return best
 
+    def text_at(self, idx: Optional[int]) -> str:
+        if idx is not None and 0 <= idx < len(self.paragraphs):
+            return self.paragraphs[idx]
+        return ""
 
-def _walk_document(root: ET.Element) -> _DocumentData:
-    body = root.find(_BODY)
-    if body is None:
-        raise DocxReviewError("document.xml 中没有找到文档主体（w:body）")
 
-    data = _DocumentData()
+class _WalkState:
+    """Facts accumulated across all document stories."""
+
+    def __init__(self) -> None:
+        self.parts: Dict[str, _PartData] = {}
+        self.quoted: Dict[str, str] = {}
+        # comment id -> (part label, paragraph index within the part)
+        self.anchor: Dict[str, Tuple[str, Optional[int]]] = {}
+        self.anchor_order: Dict[str, int] = {}
+        self.order = itertools.count()
+        self.revisions: List[Revision] = []
+        # revision -> (start, end) positions of the text-run counter, used
+        # to detect truly adjacent del+ins pairs (replacements)
+        self.rev_spans: List[Tuple[int, int]] = []
+        self.run_clock = [0]
+
+    def add_revision(self, rev: Revision, span: Tuple[int, int]) -> None:
+        self.revisions.append(rev)
+        self.rev_spans.append(span)
+
+
+def _walk_part(container: ET.Element, label: str, state: _WalkState) -> None:
+    pd = state.parts.setdefault(label, _PartData(label))
     # comment id -> text pieces accumulated while its range is open;
     # ranges may span paragraphs, so this lives outside the paragraph scope
     open_ranges: Dict[str, List[str]] = {}
-    order = itertools.count()
     cur_idx: Optional[int] = None
     cur_texts: Optional[List[str]] = None
-    # counts text-bearing runs; two revisions with touching spans have no
-    # document text between them and can form a replacement pair
-    run_clock = [0]
+    clock = state.run_clock
 
     def anchor(cid: str) -> None:
-        data.anchor_para.setdefault(cid, cur_idx)
-        data.anchor_order.setdefault(cid, next(order))
+        state.anchor.setdefault(cid, (label, cur_idx))
+        state.anchor_order.setdefault(cid, next(state.order))
 
-    def paragraph_style(el: ET.Element) -> str:
-        ppr = el.find(_PPR)
-        if ppr is not None:
-            pstyle = ppr.find(_PSTYLE)
-            if pstyle is not None:
-                return pstyle.get(_VAL, "")
-        return ""
+    def paragraph_child(el: ET.Element, parent_tag: str, child_tag: str) -> Optional[ET.Element]:
+        parent = el.find(parent_tag)
+        return parent.find(child_tag) if parent is not None else None
 
     def visit(el: ET.Element, in_del: bool, rev_buf: Optional[List[str]]) -> None:
         nonlocal cur_idx, cur_texts
         tag = el.tag
         if tag == _P:
             prev_idx, prev_texts = cur_idx, cur_texts
-            cur_idx = len(data.paragraphs)
-            data.paragraphs.append("")
+            cur_idx = len(pd.paragraphs)
+            pd.paragraphs.append("")
             cur_texts = []
             for child in el:
                 visit(child, in_del, rev_buf)
             text = _collapse("".join(cur_texts))
-            data.paragraphs[cur_idx] = text
-            if text and _HEADING_STYLE_RE.match(paragraph_style(el)):
-                data.headings.append((cur_idx, text))
+            pd.paragraphs[cur_idx] = text
+            style_el = paragraph_child(el, _PPR, _PSTYLE)
+            if text and style_el is not None and _HEADING_STYLE_RE.match(style_el.get(_VAL, "")):
+                pd.headings.append((cur_idx, text))
+            pch = paragraph_child(el, _PPR, _PPRCHANGE)
+            if pch is not None and text:
+                state.add_revision(
+                    Revision(
+                        kind="format",
+                        author=pch.get(_AUTHOR, ""),
+                        date=pch.get(_DATE, ""),
+                        text=text,
+                        para_index=cur_idx,
+                        part=label,
+                    ),
+                    (clock[0], clock[0]),
+                )
             for buf in open_ranges.values():
                 buf.append(" ")
             cur_idx, cur_texts = prev_idx, prev_texts
@@ -166,41 +202,45 @@ def _walk_document(root: ET.Element) -> _DocumentData:
             cid = el.get(_ID, "")
             buf = open_ranges.pop(cid, None)
             if buf is not None:
-                data.quoted[cid] = _collapse("".join(buf))
+                state.quoted[cid] = _collapse("".join(buf))
         elif tag in (_INS, _MOVE_TO):
-            buf: List[str] = []
-            start = run_clock[0]
+            ins_buf: List[str] = []
+            start = clock[0]
             for child in el:
-                visit(child, in_del, buf)
-            text = _collapse("".join(buf))
-            if tag == _INS and text and not in_del:
-                data.revisions.append(
+                visit(child, in_del, ins_buf)
+            text = _collapse("".join(ins_buf))
+            if text and not in_del:
+                state.add_revision(
                     Revision(
-                        kind="insert",
+                        kind="insert" if tag == _INS else "move",
                         author=el.get(_AUTHOR, ""),
                         date=el.get(_DATE, ""),
                         text=text,
                         para_index=cur_idx,
-                    )
+                        part=label,
+                    ),
+                    (start, clock[0]),
                 )
-                data.rev_spans.append((start, run_clock[0]))
         elif tag in (_DEL, _MOVE_FROM):
             del_buf: List[str] = []
-            start = run_clock[0]
+            start = clock[0]
             for child in el:
                 visit(child, True, del_buf)
             text = _collapse("".join(del_buf))
+            # moveFrom is the old location of moved text: not visible in the
+            # final document and already reported once as a "move" revision
             if tag == _DEL and text:
-                data.revisions.append(
+                state.add_revision(
                     Revision(
                         kind="delete",
                         author=el.get(_AUTHOR, ""),
                         date=el.get(_DATE, ""),
                         text=text,
                         para_index=cur_idx,
-                    )
+                        part=label,
+                    ),
+                    (start, clock[0]),
                 )
-                data.rev_spans.append((start, run_clock[0]))
         elif tag == _R:
             for child in el:
                 if child.tag == _REFERENCE:
@@ -208,7 +248,7 @@ def _walk_document(root: ET.Element) -> _DocumentData:
             text = _run_text(el)
             if not text:
                 return
-            run_clock[0] += 1
+            clock[0] += 1
             if rev_buf is not None:
                 rev_buf.append(text)
             if not in_del:
@@ -217,13 +257,27 @@ def _walk_document(root: ET.Element) -> _DocumentData:
                     cur_texts.append(text)
                 for buf in open_ranges.values():
                     buf.append(text)
+                if rev_buf is None:
+                    # plain run: surface formatting-only revisions too
+                    rch = paragraph_child(el, _RPR, _RPRCHANGE)
+                    if rch is not None:
+                        state.add_revision(
+                            Revision(
+                                kind="format",
+                                author=rch.get(_AUTHOR, ""),
+                                date=rch.get(_DATE, ""),
+                                text=text,
+                                para_index=cur_idx,
+                                part=label,
+                            ),
+                            (clock[0], clock[0]),
+                        )
         else:
             for child in el:
                 visit(child, in_del, rev_buf)
 
-    visit(body, False, None)
-    data.headings.sort(key=lambda h: h[0])
-    return data
+    visit(container, False, None)
+    pd.headings.sort(key=lambda h: h[0])
 
 
 def _merge_replacements(revisions: List[Revision], spans: List[Tuple[int, int]]) -> List[Revision]:
@@ -245,6 +299,7 @@ def _merge_replacements(revisions: List[Revision], spans: List[Tuple[int, int]])
                 adjacent
                 and complementary
                 and cur.author == nxt.author
+                and cur.part == nxt.part
                 and cur.para_index == nxt.para_index
             ):
                 deleted = cur.text if cur.kind == "delete" else nxt.text
@@ -256,6 +311,7 @@ def _merge_replacements(revisions: List[Revision], spans: List[Tuple[int, int]])
                         date=cur.date,
                         text=f"{deleted} → {inserted}",
                         para_index=cur.para_index,
+                        part=cur.part,
                         deleted=deleted,
                         inserted=inserted,
                     )
@@ -264,6 +320,29 @@ def _merge_replacements(revisions: List[Revision], spans: List[Tuple[int, int]])
                 continue
         merged.append(cur)
         i += 1
+    return merged
+
+
+def _merge_format_runs(revisions: List[Revision]) -> List[Revision]:
+    """Combine consecutive format revisions on the same paragraph.
+
+    One formatting action in Word (e.g. bolding a sentence) may split into
+    many runs; a single row per author+paragraph reads much better.
+    """
+    merged: List[Revision] = []
+    for rev in revisions:
+        prev = merged[-1] if merged else None
+        if (
+            prev is not None
+            and rev.kind == "format"
+            and prev.kind == "format"
+            and rev.author == prev.author
+            and rev.part == prev.part
+            and rev.para_index == prev.para_index
+        ):
+            prev.text = _collapse(prev.text + rev.text)
+            continue
+        merged.append(rev)
     return merged
 
 
@@ -314,6 +393,27 @@ def _read_part(zf: zipfile.ZipFile, name: str) -> Optional[ET.Element]:
         raise DocxReviewError(f"无法解析 {name}：{exc}") from exc
 
 
+def _extra_parts(names: List[str]) -> List[Tuple[str, str]]:
+    """(zip name, display label) for footnote/endnote/header/footer parts."""
+    found = [n for n in names if _EXTRA_PART_RE.match(n)]
+
+    def sort_key(name: str) -> Tuple[int, str]:
+        stem = name[len("word/") : -len(".xml")]
+        for pos, (prefix, _) in enumerate(_PART_LABELS):
+            if stem.startswith(prefix):
+                return (pos, name)
+        return (len(_PART_LABELS), name)
+
+    out: List[Tuple[str, str]] = []
+    for name in sorted(found, key=sort_key):
+        stem = name[len("word/") : -len(".xml")]
+        for prefix, label in _PART_LABELS:
+            if stem.startswith(prefix):
+                out.append((name, label))
+                break
+    return out
+
+
 def extract_review(path: "str | Path") -> Review:
     """Extract comments, replies, resolved state and tracked changes.
 
@@ -333,25 +433,35 @@ def extract_review(path: "str | Path") -> Review:
         doc_root = _read_part(zf, "word/document.xml")
         if doc_root is None:
             raise DocxReviewError(f"{p.name} 不是有效的 .docx 文件（缺少 word/document.xml）")
-        data = _walk_document(doc_root)
+        body = doc_root.find(_BODY)
+        if body is None:
+            raise DocxReviewError("document.xml 中没有找到文档主体（w:body）")
+
+        state = _WalkState()
+        _walk_part(body, "", state)
+        for name, label in _extra_parts(zf.namelist()):
+            root = _read_part(zf, name)
+            if root is not None:
+                _walk_part(root, label, state)
+
         comments_root = _read_part(zf, "word/comments.xml")
         ext_root = _read_part(zf, "word/commentsExtended.xml")
 
     all_comments = _parse_comments(comments_root) if comments_root is not None else []
     ext = _parse_extended(ext_root) if ext_root is not None else {}
 
-    def para_text(idx: Optional[int]) -> str:
-        if idx is not None and 0 <= idx < len(data.paragraphs):
-            return data.paragraphs[idx]
-        return ""
+    body_part = state.parts[""]
 
     by_para_id = {c.para_id: c for c in all_comments if c.para_id}
     top: List[Comment] = []
     for c in all_comments:
-        c.quoted = data.quoted.get(c.id, "")
-        c.para_index = data.anchor_para.get(c.id)
-        c.para_text = para_text(c.para_index)
-        c.heading = data.nearest_heading(c.para_index)
+        c.quoted = state.quoted.get(c.id, "")
+        part_label, idx = state.anchor.get(c.id, ("", None))
+        pd = state.parts.get(part_label, body_part)
+        c.part = part_label
+        c.para_index = idx
+        c.para_text = pd.text_at(idx)
+        c.heading = pd.nearest_heading(idx)
         parent_pid, done = ext.get(c.para_id, (None, False)) if c.para_id else (None, False)
         c.resolved = done
         parent = by_para_id.get(parent_pid) if parent_pid else None
@@ -361,16 +471,18 @@ def extract_review(path: "str | Path") -> Review:
             top.append(c)
 
     big = 10**9
-    top.sort(key=lambda c: data.anchor_order.get(c.id, big))
+    top.sort(key=lambda c: state.anchor_order.get(c.id, big))
 
-    revisions = _merge_replacements(data.revisions, data.rev_spans)
+    revisions = _merge_replacements(state.revisions, state.rev_spans)
+    revisions = _merge_format_runs(revisions)
     for rev in revisions:
-        rev.para_text = para_text(rev.para_index)
-        rev.heading = data.nearest_heading(rev.para_index)
+        pd = state.parts.get(rev.part, body_part)
+        rev.para_text = pd.text_at(rev.para_index)
+        rev.heading = pd.nearest_heading(rev.para_index)
 
     return Review(
         source=p.name,
-        paragraph_count=len(data.paragraphs),
+        paragraph_count=len(body_part.paragraphs),
         comments=top,
         revisions=revisions,
     )

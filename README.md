@@ -16,9 +16,10 @@ Turn the review comments, threaded replies and tracked changes inside a Word doc
 `docx-reply` 直接读取 `.docx` 内部的批注数据，一条命令生成带"修改说明"空列的对照表：
 
 - **批注全要素**：批注人、日期、批注内容、被批注的原文（精确到批注框选的文字）、所在位置（最近标题 + 段号，如"第3章 图像识别方法 · 第2段"）
+- **全文档范围**：正文之外，脚注、尾注、页眉、页脚里的批注和修订同样提取，位置自动标注（"脚注 · 第2段"）
 - **回复线程**：学生/合作者对批注的回复原样带出，主批注与回复不混淆
 - **解决状态**：Word 里"标记为已解决"的批注自动标注，配合 `--skip-resolved` 过滤已处理项
-- **修订记录**：审阅模式下的插入/删除单独成表；"选中旧词改新词"产生的紧邻删除+插入自动合并为一条"替换：旧词 → 新词"
+- **修订全类型**：插入/删除/移动/格式变更都能列出；"选中旧词改新词"产生的紧邻删除+插入自动合并为一条"替换：旧词 → 新词"
 - **四种输出**：Markdown 表格（默认）、CSV（带 BOM，Excel/WPS 双击直接打开不乱码）、JSON（供脚本处理）、**Word 版对照表（.docx，填完直接提交）**
 
 ## 安装
@@ -126,7 +127,8 @@ JSON 结构（`-f json`）：
 
 - **Made for the revision-response workflow.** The default output is a fillable response table (修改对照表) — the exact artifact students and authors must produce after receiving a reviewed manuscript — not a raw data dump. `-f docx` even writes the table as a Word document ready to hand in.
 - **Complete comment model.** Anchored text (exactly what the reviewer selected), heading-based location, threaded replies from `commentsExtended.xml`, and the resolved flag.
-- **Tracked changes, humanized.** Insertions and deletions (`w:ins` / `w:del`) with author and date; an adjacent delete+insert pair by the same author (select-and-retype in Word) is folded into a single readable `old → new` replacement. Moved text is handled correctly (visible exactly once, in its new place).
+- **Tracked changes, humanized.** Insertions, deletions, moves and formatting changes (`w:ins` / `w:del` / `w:moveTo` / `w:rPrChange` / `w:pPrChange`) with author and date; an adjacent delete+insert pair by the same author (select-and-retype in Word) is folded into a single readable `old → new` replacement, and moved text is reported once, at its new location.
+- **Whole-document coverage.** Comments and revisions in footnotes, endnotes, headers and footers are extracted too, with the story name in the location column.
 - **Filters.** `--author 王老师` and `--skip-resolved` narrow the table to what still needs action.
 - **Excel-friendly CSV.** Written with a UTF-8 BOM so Chinese text opens correctly in Excel and WPS by double-clicking.
 - **Zero dependencies.** Pure standard library (`zipfile` + `xml.etree`), Python 3.9+, offline, cross-platform, console-encoding safe on Windows.
@@ -134,9 +136,9 @@ JSON 结构（`-f json`）：
 
 ## 局限与说明
 
-- 位置以"最近标题 · 第 N 段"表示（段号按文档内全部段落顺序计）。`.docx` 文件里没有页码——页码是排版时才产生的，任何不调用 Word 排版引擎的工具都无法给出准确页码。
+- 位置以"最近标题 · 第 N 段"表示（段号按所在部分的全部段落顺序计）。`.docx` 文件里没有页码——页码是排版时才产生的，任何不调用 Word 排版引擎的工具都无法给出准确页码。
 - 标题识别基于 Word/WPS 内置标题样式（Heading 1-9 / 标题 1-9）；纯手工加粗放大的"标题"无法识别，此时退回纯段号。
-- 目前只处理正文（`document.xml`）中的批注与修订；页眉/页脚/脚注中的批注、移动修订（moveFrom/moveTo）的独立列出、格式修订暂不支持，见 [Roadmap](#roadmap)。
+- 移动的文字在新位置以"移动"列出一次，暂不标注来源位置；格式修订只报告"哪些文字的格式变了"，不展开具体格式差异。
 - 老式 `.doc` 二进制格式不支持，请先在 Word/WPS 中另存为 `.docx`。
 
 ## Roadmap
@@ -145,7 +147,8 @@ JSON 结构（`-f json`）：
 - [x] `--author` / `--skip-resolved` 过滤 — v0.2.0
 - [x] 直接输出 `.docx` 格式的修改对照表 — v0.2.0
 - [x] 紧邻删除+插入合并为"替换" — v0.2.0
-- [ ] 脚注/页眉页脚中的批注；移动/格式修订
+- [x] 脚注/尾注/页眉/页脚中的批注与修订 — v0.3.0
+- [x] 移动修订、格式修订 — v0.3.0
 - [ ] 修改说明列的 AI 草拟（对接本地 LLM）
 
 ## 贡献
