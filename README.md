@@ -3,9 +3,9 @@
 [![CI](https://github.com/hc-ui/docx-reply/actions/workflows/ci.yml/badge.svg)](https://github.com/hc-ui/docx-reply/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**把 Word 批注和修订一键导出成"修改对照表"。**
+导师批注、盲审返修：把 Word 里的批注和修订一键导出成「修改对照表」，不用再逐条复制。
 
-Turn the review comments, threaded replies and tracked changes inside a Word document (`.docx`) into a fillable **revision response table** — as Markdown, CSV (Excel/WPS ready) or JSON. Zero dependencies, works offline, one command.
+输出 Markdown / CSV / JSON / Word。零依赖，离线。同系列：[gbt7714-lint](https://github.com/hc-ui/gbt7714-lint) 查参考文献格式。
 
 ## 为什么需要它
 
@@ -26,7 +26,7 @@ Turn the review comments, threaded replies and tracked changes inside a Word doc
 pip install git+https://github.com/hc-ui/docx-reply.git
 ```
 
-无任何第三方依赖，Python 3.9+，支持 Microsoft Word 与 WPS Office 产生的文档。（PyPI 包名 `docx-reply` 上架中，上架后可直接 `pip install docx-reply`。）
+无第三方依赖，Python 3.9+。支持 Word 与 WPS 文档。尚未上 PyPI。
 
 ## 使用
 
