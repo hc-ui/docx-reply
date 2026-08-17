@@ -499,6 +499,11 @@ def extract_review(path: str | Path) -> Review:
     p = Path(path)
     if not p.is_file():
         raise DocxReviewError(f"文件不存在：{p}")
+    if p.suffix.lower() == ".doc":
+        raise DocxReviewError(
+            f"{p.name} 是 Word 97–2003 的 .doc，不是 .docx。"
+            "请先在 Word 或 WPS 里另存为 .docx。"
+        )
     try:
         zf = zipfile.ZipFile(p)
     except zipfile.BadZipFile as exc:

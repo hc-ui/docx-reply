@@ -237,3 +237,10 @@ def test_zip_without_document_xml_raises(tmp_path):
 def test_missing_file_raises(tmp_path):
     with pytest.raises(DocxReviewError, match="文件不存在"):
         extract_review(tmp_path / "nope.docx")
+
+
+def test_legacy_doc_extension_is_rejected(tmp_path):
+    path = tmp_path / "thesis.doc"
+    path.write_bytes(b"not-a-docx")
+    with pytest.raises(DocxReviewError, match=r"另存为 \.docx"):
+        extract_review(path)
