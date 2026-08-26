@@ -74,13 +74,28 @@ def main(argv: list[str] | None = None) -> int:
         review.comments = _filter_comments_by_author(review.comments, wanted)
         review.revisions = [r for r in review.revisions if r.author.strip() in wanted]
     if args.skip_resolved:
-        review.comments = [c for c in review.comments if not c.resolved]
+        review.comments = _drop_resolved(review.comments)
 
     try:
         return _emit(review, args)
     except OSError as exc:
         print(f"错误：无法写入输出文件：{exc}", file=sys.stderr)
         return 2
+
+
+def _drop_resolved(comments: list[Comment]) -> list[Comment]:
+    """Drop resolved comments anywhere in the thread, keep unresolved parents.
+
+    A resolved parent (Word's "mark as done") drops the whole conversation.
+    An unresolved parent keeps context and only loses resolved replies.
+    """
+    kept: list[Comment] = []
+    for comment in comments:
+        if comment.resolved:
+            continue
+        comment.replies = _drop_resolved(comment.replies)
+        kept.append(comment)
+    return kept
 
 
 def _filter_comments_by_author(comments: list[Comment], wanted: set[str]) -> list[Comment]:
