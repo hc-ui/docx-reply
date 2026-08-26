@@ -98,6 +98,10 @@ def _count(comments: list[Comment]) -> int:
     return sum(1 + _count(c.replies) for c in comments)
 
 
+def _count_resolved(comments: list[Comment]) -> int:
+    return sum((1 if c.resolved else 0) + _count_resolved(c.replies) for c in comments)
+
+
 @dataclass
 class Review:
     """Everything extracted from one document."""
@@ -117,7 +121,7 @@ class Review:
 
     @property
     def resolved_count(self) -> int:
-        return sum(1 for c in self.comments if c.resolved)
+        return _count_resolved(self.comments)
 
     @property
     def authors(self) -> list[str]:
