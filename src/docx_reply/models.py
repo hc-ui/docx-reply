@@ -121,11 +121,11 @@ class Review:
 
     @property
     def authors(self) -> list[str]:
-        seen: list[str] = []
+        seen: dict[str, None] = {}
 
         def add(name: str) -> None:
-            if name and name not in seen:
-                seen.append(name)
+            if name:
+                seen[name] = None
 
         def walk(comments: list[Comment]) -> None:
             for c in comments:
@@ -135,7 +135,7 @@ class Review:
         walk(self.comments)
         for rev in self.revisions:
             add(rev.author)
-        return seen
+        return list(seen)
 
     def to_dict(self) -> dict:
         return {

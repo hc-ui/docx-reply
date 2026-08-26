@@ -1,5 +1,6 @@
 """docx-reply: turn Word review comments & tracked changes into a revision response table."""
 
+from . import fastpath as _fastpath  # noqa: F401
 from .models import Comment, Review, Revision
 from .parse import DocxReviewError, extract_review
 from .render import (
@@ -10,7 +11,7 @@ from .render import (
     render_revisions_csv,
 )
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"
 
 __all__ = [
     "Comment",
