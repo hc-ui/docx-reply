@@ -143,6 +143,24 @@ def test_skip_resolved(tmp_path, capsys):
     assert "意见一" not in out
 
 
+def test_skip_resolved_drops_resolved_replies(tmp_path, capsys):
+    body = p(anchored("片段", "0") + '<w:r><w:commentReference w:id="1"/></w:r>')
+    comments = comment_xml("0", "王老师", "父批注未解决", para_id="P0") + comment_xml(
+        "1", "小明", "已解决的回复", para_id="P1"
+    )
+    ex = (
+        '<w15:commentEx w15:paraId="P0" w15:done="0"/>'
+        '<w15:commentEx w15:paraId="P1" w15:paraIdParent="P0" w15:done="1"/>'
+    )
+    path = write_docx(tmp_path / "thread.docx", body, comments, ex)
+    assert main([str(path), "--skip-resolved", "-f", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["comments"]) == 1
+    assert payload["comments"][0]["text"] == "父批注未解决"
+    assert payload["comments"][0]["replies"] == []
+    assert all("已解决的回复" not in (reply.get("text") or "") for reply in payload["comments"][0]["replies"])
+
+
 # ---------------------------------------------------------------- docx out
 
 

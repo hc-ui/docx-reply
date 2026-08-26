@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .models import Comment, Review
 from .parse import DocxReviewError, extract_review
 from .render import (
     render_comments_csv,
@@ -70,14 +71,63 @@ def main(argv: list[str] | None = None) -> int:
     if args.author:
         # Word sometimes stores author names with stray surrounding spaces
         wanted = {a.strip() for a in args.author}
-        review.comments = [c for c in review.comments if c.author.strip() in wanted]
+        review.comments = _filter_comments_by_author(review.comments, wanted)
         review.revisions = [r for r in review.revisions if r.author.strip() in wanted]
     if args.skip_resolved:
-        review.comments = [c for c in review.comments if not c.resolved]
+        review.comments = _drop_resolved(review.comments)
 
+    try:
+        return _emit(review, args)
+    except OSError as exc:
+        print(f"错误：无法写入输出文件：{exc}", file=sys.stderr)
+        return 2
+
+
+def _drop_resolved(comments: list[Comment]) -> list[Comment]:
+    """Drop resolved comments anywhere in the thread, keep unresolved parents.
+
+    A resolved parent (Word's "mark as done") drops the whole conversation.
+    An unresolved parent keeps context and only loses resolved replies.
+    """
+    kept: list[Comment] = []
+    for comment in comments:
+        if comment.resolved:
+            continue
+        comment.replies = _drop_resolved(comment.replies)
+        kept.append(comment)
+    return kept
+
+
+def _filter_comments_by_author(comments: list[Comment], wanted: set[str]) -> list[Comment]:
+    """Keep a thread if the author or any nested reply matches.
+
+    Matching a parent keeps the whole conversation. Matching only a reply
+    keeps the parent for context and the matching reply subtree.
+    """
+    kept: list[Comment] = []
+    for comment in comments:
+        self_hit = comment.author.strip() in wanted
+        child_kept = _filter_comments_by_author(comment.replies, wanted)
+        if self_hit:
+            kept.append(comment)
+        elif child_kept:
+            comment.replies = child_kept
+            kept.append(comment)
+    return kept
+
+
+def _write_output(path: Path, *, text: str | None = None, data: bytes | None = None, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if data is not None:
+        path.write_bytes(data)
+        return
+    path.write_text(text or "", encoding=encoding)
+
+
+def _emit(review: Review, args: argparse.Namespace) -> int:
     if args.format == "docx":
         out = Path(args.output)
-        out.write_bytes(render_docx(review))
+        _write_output(out, data=render_docx(review))
         print(f"已写入 {out}", file=sys.stderr)
         print(
             f"共 {review.total_comments} 条批注（含 {review.reply_count} 条回复）、{len(review.revisions)} 处修订",
@@ -96,11 +146,11 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(args.output)
         # BOM so that double-clicking the CSV opens correctly in Excel/WPS
         encoding = "utf-8-sig" if args.format == "csv" else "utf-8"
-        out.write_text(content, encoding=encoding)
+        _write_output(out, text=content, encoding=encoding)
         written = [str(out)]
         if args.format == "csv" and review.revisions:
             rev_path = out.with_name(out.stem + ".revisions.csv")
-            rev_path.write_text(render_revisions_csv(review), encoding="utf-8-sig")
+            _write_output(rev_path, text=render_revisions_csv(review), encoding="utf-8-sig")
             written.append(str(rev_path))
         print("已写入 " + "、".join(written), file=sys.stderr)
     else:

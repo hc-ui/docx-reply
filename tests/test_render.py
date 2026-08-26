@@ -114,3 +114,25 @@ def test_json_structure():
     assert payload["comments"][0]["paragraph"] == 2
     assert payload["comments"][0]["replies"][0]["author"] == "小明"
     assert payload["revisions"][0]["kind"] == "insert"
+
+
+def test_resolved_count_includes_nested_replies():
+    reply = Comment(
+        id="1",
+        author="小明",
+        initials="M",
+        date="",
+        text="已改",
+        resolved=True,
+    )
+    parent = Comment(
+        id="0",
+        author="王老师",
+        initials="W",
+        date="",
+        text="请改",
+        replies=[reply],
+    )
+    review = Review(source="x.docx", comments=[parent])
+    assert review.resolved_count == 1
+    assert review.total_comments == 2
